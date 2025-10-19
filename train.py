@@ -23,10 +23,8 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
     data_a.to('cuda')  # 固定使用GPU
     device = 'cuda'
     aug_mode = getattr(args, 'augment_mode', 'static')
-    aug_name = getattr(args, 'augment', 'random_permute_features')
-    # 若传入多种增强，在线增强仅取第一个，保持稳定
-    aug_online = aug_name[0] if isinstance(aug_name, (list, tuple)) and len(aug_name) > 0 else aug_name
-    aug_online = str(aug_online)  # 统一为字符串，消除类型检查告警
+    # 在线增强阶段固定为 random_permute_features（不再取列表首个）
+    aug_online = "random_permute_features"
     noise_std = float(getattr(args, 'noise_std', 0.01) or 0.01)
     mask_rate = float(getattr(args, 'mask_rate', 0.1) or 0.1)
     base_seed = getattr(args, 'augment_seed', None)
@@ -111,6 +109,12 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
                 # 为每个 batch 派生稳定种子：seed + epoch*1000 + iter
                 seed_batch = int(base_seed) + epoch * 1000 + i
                 # apply_augmentation 支持 torch.Tensor；返回 CPU 张量，需移回原 device
+                # 视图生成起止打印（在线增强）
+                if i == 0:
+                    try:
+                        print(f"[AUG][online][epoch={epoch+1}][iter={i}] start name={aug_online} noise_std={noise_std} mask_rate={mask_rate} seed={seed_batch}")
+                    except Exception:
+                        pass
                 aug_x = apply_augmentation(
                     aug_online,
                     data_a.x,  # 可直接传 torch.Tensor
@@ -118,6 +122,12 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
                     mask_rate=mask_rate,
                     seed=seed_batch
                 )
+                if i == 0:
+                    try:
+                        _shape = tuple(aug_x.shape) if hasattr(aug_x, "shape") else "-"
+                        print(f"[AUG][online][epoch={epoch+1}][iter={i}] done name={aug_online} shape={_shape}")
+                    except Exception:
+                        pass
                 if isinstance(aug_x, torch.Tensor):
                     aug_x = aug_x.to(device)
                 else:
@@ -132,7 +142,8 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
             model.train()  # 将模型设置为训练模式
             optimizer.zero_grad()  # 清除上一批次的梯度
 
-            if str(getattr(args, "adv_mode", "none")) == "mgraph":
+            # 仅在训练后期启用 PGD：epoch+1 >= adv_warmup_end
+            if str(getattr(args, "adv_mode", "none")) == "mgraph" and int(epoch + 1) >= int(getattr(args, "adv_warmup_end", 0) or 0):
                 # 多图对抗：构造闭包并生成对抗后的 X
                 use_moco_adv = bool(getattr(args, "adv_on_moco", False))
                 # 准备输入列表：总是包含 data_o.x；当 use_moco_adv 为真时，增加增强视图 x
@@ -309,6 +320,11 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
         print(f"[SAVE] Failed to write per-epoch metrics: {_e}")
 
     # Testing  # 注释：测试阶段
+    # 在进入测试前注入当前折信息（用于文件命名）
+    try:
+        setattr(args, "_current_fold", fold_idx if 'fold_idx' in locals() else getattr(args, "_current_fold", None))
+    except Exception:
+        pass
     # 调用test函数，在测试集上评估最终模型
     auroc_test, prc_test, precision_test, recall_test, f1_test, loss_test, cm_test = test(model, test_loader, data_o, data_a, args)
     tn_t, fp_t, fn_t, tp_t = cm_test
@@ -341,6 +357,7 @@ def test(model, loader, data_o, data_a, args):  # 定义测试函数
 
     model.eval()  # 将模型设置为评估模式（会关闭dropout等）
     y_pred = []  # 初始化列表，用于存储预测值
+    y_pred_logits = []  # 原始未Sigmoid的logits（用于温度校准）
     y_label = []  # 初始化列表，用于存储真实标签
     loss = torch.tensor(0.0) # 初始化损失，防止在加载器为空时引用错误
     lbl = data_a.y  # 获取对抗数据的标签
@@ -362,6 +379,8 @@ def test(model, loader, data_o, data_a, args):  # 定义测试函数
 
             # 测试阶段不进行在线增强，保持 data_a 静态
             output, cla_os, cla_os_a, _, logits, log1 = model(data_o, data_a, inp)  # 前向传播
+            # 原始logit与Sigmoid概率
+            logit_raw = torch.squeeze(output)
             log = torch.squeeze(m(output))  # 获取主任务预测概率
 
             # 计算测试集上的损失（尽管在测试阶段通常更关心指标而非损失值）
@@ -381,11 +400,90 @@ def test(model, loader, data_o, data_a, args):  # 定义测试函数
             label_ids = label.to('cpu').numpy()  # 将标签移回CPU
             y_label = y_label + label_ids.flatten().tolist()  # 收集真实标签
             y_pred = y_pred + log.flatten().tolist()  # 收集预测概率
+            y_pred_logits = y_pred_logits + logit_raw.flatten().tolist()  # 收集原始logits
     
     # 如果测试集为空，则返回0，避免程序崩溃
     if not y_label:
         # 与正常分支保持一致返回项数：auroc, auprc, precision, recall, f1, loss, cm
         return 0.0, 0.0, 0.0, 0.0, 0.0, loss, (0, 0, 0, 0)
+
+    # 阶段A：温度校准与阈值扫描（不改变原返回，结果另存）
+    try:
+        do_scan = bool(getattr(args, "enable_threshold_scan", False))
+        do_temp = bool(getattr(args, "enable_temp_scaling", False))
+        tmin = float(getattr(args, "threshold_min", 0.35))
+        tmax = float(getattr(args, "threshold_max", 0.65))
+        tstep = float(getattr(args, "threshold_step", 0.01))
+        Tmin = float(getattr(args, "temp_grid_min", 0.5))
+        Tmax = float(getattr(args, "temp_grid_max", 3.0))
+        Tnum = int(getattr(args, "temp_grid_num", 26))
+
+        best_t = None
+        best_f1 = None
+        best_t_cal = None
+        best_f1_cal = None
+        best_T = None
+
+        y_true_np = np.asarray(y_label, dtype=np.int64)
+        probs_np = np.asarray(y_pred, dtype=np.float32)
+
+        # 简易温度校准（网格搜索）：最小化 BCE
+        if do_temp and len(y_pred_logits) == len(y_label):
+            logits_np = np.asarray(y_pred_logits, dtype=np.float32)
+            T_candidates = np.linspace(Tmin, Tmax, num=max(2, Tnum))
+            bce_min = None
+            T_opt = None
+            for T in T_candidates:
+                probs_T = 1.0 / (1.0 + np.exp(-logits_np / float(T)))
+                # 避免log(0)
+                eps = 1e-7
+                probs_T = np.clip(probs_T, eps, 1.0 - eps)
+                # 二分类交叉熵
+                bce = -(y_true_np * np.log(probs_T) + (1 - y_true_np) * np.log(1.0 - probs_T)).mean()
+                if (bce_min is None) or (bce < bce_min):
+                    bce_min = bce
+                    T_opt = float(T)
+            best_T = T_opt
+
+        # 阈值扫描（原概率）
+        if do_scan:
+            ths = np.arange(tmin, tmax + 1e-12, tstep)
+            def _f1_at_thresh(p, thr):
+                preds = (p >= thr).astype(np.int64)
+                from sklearn.metrics import f1_score
+                return f1_score(y_true_np, preds, zero_division="warn")
+            f1_vals = [ _f1_at_thresh(probs_np, thr) for thr in ths ]
+            idx = int(np.argmax(f1_vals))
+            best_t, best_f1 = float(ths[idx]), float(f1_vals[idx])
+
+        # 阈值扫描（温度校准概率）
+        if do_scan and do_temp and best_T is not None and len(y_pred_logits) == len(y_label):
+            probs_cal = 1.0 / (1.0 + np.exp(-np.asarray(y_pred_logits, dtype=np.float32) / float(best_T)))
+            f1_vals_cal = [ _f1_at_thresh(probs_cal, thr) for thr in ths ]
+            idxc = int(np.argmax(f1_vals_cal))
+            best_t_cal, best_f1_cal = float(ths[idxc]), float(f1_vals_cal[idxc])
+
+        # 保存结果到 metrics/threshold_scan_*.txt
+        try:
+            from log_output_manager import save_result_text, get_run_paths
+            _paths = get_run_paths()
+            _run_id = _paths.get("run_id") or ""
+            _fold = getattr(args, "_current_fold", None)
+            fname = f"threshold_scan_fold_{_fold}_{_run_id}.txt" if _run_id and _fold else ("threshold_scan.txt" if not _fold else f"threshold_scan_fold_{_fold}.txt")
+            lines = []
+            lines.append("Threshold Scan & Temperature Scaling")
+            lines.append(f"scan_range=[{tmin},{tmax}] step={tstep} temp_grid=[{Tmin},{Tmax}] num={Tnum}")
+            if best_t is not None:
+                lines.append(f"best_threshold={best_t:.3f} F1@best={best_f1:.4f}")
+            if best_T is not None:
+                lines.append(f"best_temperature={best_T:.3f}")
+            if best_t_cal is not None:
+                lines.append(f"calibrated_best_threshold={best_t_cal:.3f} F1_calib@best={best_f1_cal:.4f}")
+            save_result_text("\n".join(lines), filename=fname, subdir="metrics")
+        except Exception as _e:
+            print(f"[SCAN] save failed: {_e}")
+    except Exception as _e:
+        print(f"[SCAN] skipped due to: {_e}")
 
     # 在循环结束后，根据所有批次的预测概率计算硬预测（0或1）
     outputs = np.asarray([1 if i else 0 for i in (np.asarray(y_pred) >= 0.5)])

@@ -23,6 +23,14 @@ from log_output_manager import *
 # 初始化集中日志（文件+控制台），日志开头记录完整命令
 # 先解析全部参数（含 run_name、shutdown）
 args = settings()
+# 验证早停设置：若未在参数中提供则注入默认值，使阶段B/C训练受益
+if not hasattr(args, "early_stop_patience"):
+    args.early_stop_patience = 3
+if not hasattr(args, "early_stop_min_delta"):
+    args.early_stop_min_delta = 0.0
+# 采用验证集 AUPRC 作为早停指标（train_model 内部应读取 args 使用；未使用则不影响）
+if not hasattr(args, "early_stop_metric"):
+    args.early_stop_metric = "auprc"
 
 
 

@@ -288,11 +288,8 @@ def load_data(args, k_fold=5):
         if fold == 0:
             args.dimensions = features_o.shape[1]
 
-        # 对抗/增强特征视图：根据 --augment 选择增强（默认 random_permute_features）
-        aug_name = getattr(args, "augment", "random_permute_features")
-        # 兼容多选增强：静态构图阶段仅取第一个增强名
-        if isinstance(aug_name, (list, tuple)):
-            aug_name = aug_name[0] if len(aug_name) > 0 else "random_permute_features"
+        # 对抗/增强特征视图：固定为 random_permute_features（满足“始终使用该方法生成 features_a”的要求）
+        aug_name = "random_permute_features"
         noise_std = float(getattr(args, "noise_std", 0.01) or 0.01)
         mask_rate = float(getattr(args, "mask_rate", 0.1) or 0.1)
         base_seed = getattr(args, "augment_seed", None)
@@ -307,6 +304,11 @@ def load_data(args, k_fold=5):
             # 无增强：直接引用原特征张量
             features_a = x_o
         else:
+            # 视图生成起止打印（静态增强）
+            try:
+                print(f"[AUG][static][fold={fold+1}] start name={aug_name} noise_std={noise_std} mask_rate={mask_rate} seed={base_seed}")
+            except Exception:
+                pass
             features_a = apply_augmentation(
                 aug_name,
                 x_o,
@@ -314,6 +316,11 @@ def load_data(args, k_fold=5):
                 mask_rate=mask_rate,
                 seed=base_seed
             )
+            try:
+                _shape = tuple(features_a.shape) if hasattr(features_a, "shape") else "-"
+                print(f"[AUG][static][fold={fold+1}] done name={aug_name} shape={_shape}")
+            except Exception:
+                pass
 
         # 记录增强统计（全 Torch 计算，避免 numpy 回落）与折级统计
         try:

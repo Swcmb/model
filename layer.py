@@ -161,26 +161,34 @@ class MoCoV2MultiView(nn.Module):
 
     @torch.no_grad()
     def _dequeue_and_enqueue(self, keys: torch.Tensor, view_idx: int):
-        # 出队入队：环形队列更新
+        # 出队入队：环形队列更新（安全切片，避免越界）
         keys = keys.detach()
-        batch_size = keys.shape[0]
-        if batch_size <= 0:
+        n_new = int(keys.shape[0])
+        if n_new <= 0:
             return
-        K = self.K
         queue = getattr(self, f"queue_{view_idx}")
         queue_ptr = getattr(self, f"queue_ptr_{view_idx}")
+        K = int(queue.size(1))  # 队列列数作为容量
         ptr = int(queue_ptr.item())
-        if ptr + batch_size <= K:
-            queue[:, ptr:ptr + batch_size] = keys.t()
-            ptr = (ptr + batch_size) % K
+        # 统一用转置后的 [C, B] 视图进行列区间写入
+        kT = keys.t()  # [C, n_new]
+
+        # 剩余容量
+        rem = K - ptr
+        if n_new <= rem:
+            # 单段写入：完全装入尾部
+            queue[:, ptr:ptr + n_new] = kT[:, :n_new]
+            ptr = (ptr + n_new) % K
         else:
-            first = K - ptr
-            second = batch_size - first
-            if first > 0:
-                queue[:, ptr:] = keys[:first].t()
-            if second > 0:
-                queue[:, :second] = keys[first:].t()
-            ptr = second % K
+            # 两段写入：尾段 + 头段
+            len1 = rem
+            if len1 > 0:
+                queue[:, ptr:ptr + len1] = kT[:, :len1]
+            len2 = min(n_new - len1, K)  # 头段长度不超过 K
+            if len2 > 0:
+                queue[:, 0:len2] = kT[:, len1:len1 + len2]
+            ptr = (ptr + n_new) % K
+
         queue_ptr[0] = ptr
 
     def forward(self, q_embed: torch.Tensor, k_embeds: List[torch.Tensor]):
@@ -195,7 +203,8 @@ class MoCoV2MultiView(nn.Module):
         q = F.normalize(self.q_proj(q_embed), dim=1)
         # 步数自增
         self.global_step = int(self.global_step) + 1
-        warmup = self.global_step <= self.queue_warmup_steps
+        # 修正：当 queue_warmup_steps=0 时不应进入 warmup
+        warmup = self.global_step < self.queue_warmup_steps
 
         logits_list, targets_list = [], []
 
