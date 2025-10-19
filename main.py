@@ -13,7 +13,6 @@ from utils import set_global_seed  # 随机性统一设置
 from data_preprocess import load_data, get_fold_data  # 数据加载与折叠划分
 from instantiation import Create_model  # 模型实例化
 from train import train_model  # 训练流程
-from autodl import init_autodl_env  # 自动并行与环境初始化
 from log_output_manager import *
 
 
