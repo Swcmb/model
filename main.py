@@ -13,8 +13,23 @@ from utils import set_global_seed  # 随机性统一设置
 from data_preprocess import load_data, get_fold_data  # 数据加载与折叠划分
 from instantiation import Create_model  # 模型实例化
 from train import train_model  # 训练流程
-from autodl import init_autodl_env  # 自动并行与环境初始化
+
 from log_output_manager import *
+# 可视化
+from visualization import (
+    load_epoch_metrics_csv,
+    plot_multi_loss_breakdown,
+    plot_epoch_metrics_bar,
+    plot_train_vs_val_loss,
+    plot_epoch_curves_from_df,
+    plot_roc_curve,
+    plot_pr_curve,
+    plot_calibration_curve,
+    plot_temperature_scaling_effect,
+    plot_threshold_scan,
+    plot_per_fold_comparison,
+    plot_confusion_matrix_heatmap
+)
 
 
 # 参数改由 EM/parms_setting.py 统一解析（包含 --run_name 与 --shutdown）
@@ -35,8 +50,7 @@ if not hasattr(args, "early_stop_metric"):
 
 
 
-# 统一性能优化初始化（NUMA/亲和、并行线程、环境变量注入）
-init_autodl_env(args)
+# 已移除自动并行环境初始化（按反馈不要性能增强）
 
 # 初始化集中日志（文件+控制台），带 run_name
 logger = init_logging(run_name=args.run_name)
@@ -184,6 +198,123 @@ try:
     logger.info(f"Confusion Matrix (sum): tn={cm_sum[0]}, fp={cm_sum[1]}, fn={cm_sum[2]}, tp={cm_sum[3]}")
 except Exception as _e:
     logger.warning(f"Failed to save extra metrics: {_e}")
+
+# ===== 自动生成可视化图像输出到 OUTPUT/result 下 =====
+try:
+    from log_output_manager import get_run_paths, make_result_run_dir
+    _paths = get_run_paths()
+    _run_dir = _paths.get("run_result_dir") or str(make_result_run_dir("data"))
+    _run_id = _paths.get("run_id") or os.path.basename(_run_dir)
+
+    _metrics_dir_em = os.path.join(_run_dir, "metrics")
+    # 1) 每折：训练epoch指标（loss/分项/auroc/auprc/f1）
+    for fold in range(1, 6):
+        try:
+            csv_name = f"train_epoch_metrics_fold_{fold}_{_run_id}.csv"
+            csv_path = os.path.join(_metrics_dir_em, csv_name)
+            if os.path.exists(csv_path):
+                df = load_epoch_metrics_csv(csv_path)
+                # 多损失分解
+                plot_multi_loss_breakdown(df["epoch"].tolist(), df["task_loss"].tolist(), df["cont_loss"].tolist(), df["adv_loss"].tolist(),
+                                          stacked=False, save_path=f"loss_breakdown_fold_{fold}.png")
+                # 每epoch指标柱状
+                plot_epoch_metrics_bar(df, metrics=["auroc", "auprc", "f1"],
+                                       save_path=f"epoch_metrics_bar_fold_{fold}.png")
+                # 按Epoch三曲线：train_loss/val_loss/val_AUROC（双y轴）
+                plot_epoch_curves_from_df(
+                    df,
+                    save_path=f"epoch_curves_fold_{fold}.png",
+                    title="按Epoch的训练/验证损失与验证AUROC曲线"
+                )
+        except Exception as _e:
+            logger.warning(f"[VIS] fold {fold} epoch metrics plot skipped: {_e}")
+
+    # 2) 测试阶段曲线：从 OUTPUT/result/metrics 读取
+    _metrics_dir_out = os.path.join(_run_dir, "metrics")
+    for fold in range(1, 6):
+        fold_tag = f"fold_{fold}"
+        try:
+            arr_csv = os.path.join(_metrics_dir_out, f"y_true_pred_{fold_tag}_{_run_id}.csv")
+            if os.path.exists(arr_csv):
+                import pandas as _pd
+                arr_df = _pd.read_csv(arr_csv)
+                y_true = arr_df["y_true"].astype(int).tolist()
+                y_prob = arr_df["y_prob"].astype(float).tolist()
+                logits = arr_df["logit"].astype(float).tolist()
+                # ROC / PR / 校准
+                plot_roc_curve(y_true, y_prob, save_path=f"roc_fold_{fold}.png")
+                plot_pr_curve(y_true, y_prob, save_path=f"pr_fold_{fold}.png")
+                plot_calibration_curve(y_true, y_prob, save_path=f"calibration_fold_{fold}.png")
+                # 温度缩放效果（若有最佳T）
+                import json as _json
+                T_json = os.path.join(_metrics_dir_out, f"temperature_{fold_tag}_{_run_id}.json")
+                T_opt = None
+                if os.path.exists(T_json):
+                    with open(T_json, "r", encoding="utf-8") as f:
+                        T_opt = float(_json.load(f).get("best_T"))
+                plot_temperature_scaling_effect(y_true, logits, T_opt, save_path=f"temperature_effect_fold_{fold}.png")
+            # 阈值扫描
+            th_csv = os.path.join(_metrics_dir_out, f"threshold_scan_{fold_tag}_{_run_id}.csv")
+            if os.path.exists(th_csv):
+                import pandas as _pd
+                th_df = _pd.read_csv(th_csv)
+                plot_threshold_scan(th_df["threshold"].tolist(), th_df["f1"].tolist(),
+                                    save_path=f"threshold_scan_fold_{fold}.png")
+            th_cal_csv = os.path.join(_metrics_dir_out, f"threshold_scan_calibrated_{fold_tag}_{_run_id}.csv")
+            if os.path.exists(th_cal_csv):
+                import pandas as _pd
+                th_df2 = _pd.read_csv(th_cal_csv)
+                plot_threshold_scan(th_df2["threshold"].tolist(), th_df2["f1_cal"].tolist(),
+                                    save_path=f"threshold_scan_calibrated_fold_{fold}.png",
+                                    title="F1 vs. 阈值扫描（温度校准后）")
+        except Exception as _e:
+            logger.warning(f"[VIS] fold {fold} test curves plot skipped: {_e}")
+
+    # 3) 每折性能比较（箱线）
+    try:
+        plot_per_fold_comparison(all_fold_results, use_violin=False,
+                                 save_path="per_fold_box.png")
+    except Exception as _e:
+        logger.warning(f"[VIS] per-fold comparison skipped: {_e}")
+
+    # 4) 混淆矩阵热力图（合计）
+    try:
+        import numpy as _np
+        cm_sum = _np.array([0,0,0,0], dtype=_np.int64)
+        for result in all_fold_results:
+            tn, fp, fn, tp = result.get('cm', (0,0,0,0))
+            cm_sum += _np.array([tn, fp, fn, tp], dtype=_np.int64)
+        plot_confusion_matrix_heatmap(tuple(cm_sum.tolist()), normalize=False,
+                                      save_path="confusion_matrix_sum.png",
+                                      title="混淆矩阵（5折合计）")
+    except Exception as _e:
+        logger.warning(f"[VIS] confusion matrix plot skipped: {_e}")
+
+    try:
+        _fig_dir = os.path.join(_run_dir, "figure")
+        files = sorted([os.path.join(_fig_dir, f) for f in os.listdir(_fig_dir) if f.lower().endswith(".png")])
+        for p in files:
+            logger.info(f"[VIS] saved: {os.path.abspath(p)}")
+        logger.info(f"[VIS] All plots saved to {_fig_dir}")
+    except Exception as _e_list:
+        logger.warning(f"[VIS] list saved files failed: {_e_list}")
+    # 生成 metrics 清单（CSV/JSON）
+    try:
+        _metrics_dir_out = os.path.join(_run_dir, "metrics")
+        os.makedirs(_metrics_dir_out, exist_ok=True)
+        manifest_path = os.path.join(_metrics_dir_out, "files_manifest.txt")
+        items = []
+        for fname in sorted(os.listdir(_metrics_dir_out)):
+            if fname.lower().endswith(".csv") or fname.lower().endswith(".json"):
+                items.append(os.path.abspath(os.path.join(_metrics_dir_out, fname)))
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            for p in items:
+                f.write(p + "\n")
+        logger.info(f"[VIS] metrics manifest saved: {os.path.abspath(manifest_path)} ({len(items)} items)")
+    except Exception as _e_manifest:
+        logger.warning(f"[VIS] metrics manifest failed: {_e_manifest}")
+except Exception as _e:
+    logger.warning(f"[VIS] auto plotting failed: {_e}")
 
 logger.info("All folds completed!")
 # 记录运行结束并（在 Linux 且命令指定时）执行关机

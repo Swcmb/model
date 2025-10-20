@@ -6,7 +6,7 @@ import torch                  # 深度学习张量与设备管理
 import scipy.sparse as sp     # 稀疏矩阵运算
 from torch.utils.data import Dataset, DataLoader  # 数据集与加载器
 from torch_geometric.data import Data             # 图数据封装（PyTorch Geometric）
-from autodl import decide_dataloader_workers      # 统一 DataLoader 并行策略
+
 from utils import *                         # 通用工具（含 BASE_DIR、图构建、归一化等）
 from utils import em_path as _p             # 统一路径解析（简写）
 from layer import load_positive, load_negative_all, sample_negative, attach_labels, apply_augmentation# 样本构建与特征增强
@@ -378,7 +378,7 @@ def load_data(args, k_fold=5):
 
     # 为所有折构建 DataLoader（并行策略由 autodl 决策）
     os_name = platform.system().lower()
-    num_workers = decide_dataloader_workers(args)
+    num_workers = 0
     prefetch_factor = int(getattr(args, "prefetch_factor", 4) or 4)
 
     base_params = {'batch_size': args.batch, 'shuffle': True, 'drop_last': True}

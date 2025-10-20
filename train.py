@@ -1,5 +1,6 @@
 import random  # 随机数控制（用于批次级对抗种子派生）
 import json  # 用于保存与加载对抗配置
+import os  # 文件保存路径
 import numpy as np  # 数值计算库
 import matplotlib.pyplot as plt  # 绘图库（当前文件中可能未使用）
 import torch  # PyTorch 主库
@@ -8,6 +9,8 @@ from torch_geometric.data import Data  # 图数据结构支持
 from layer import apply_augmentation, adversarial_step_multi  # 增强与对抗步骤
 from log_output_manager import save_result_text, get_run_paths  # 日志与结果管理
 from sklearn.metrics import roc_auc_score,roc_curve,average_precision_score,f1_score,auc,precision_score,recall_score,confusion_matrix
+# 可视化：按Epoch绘制 train_loss / val_loss / val_AUROC
+from visualization import load_epoch_metrics_csv, plot_epoch_curves_from_df
 
 
 def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, args, fold_idx=None):  # 定义主训练函数，增加fold索引
@@ -265,9 +268,22 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
             f1_train = 0.0
             tn = fp = fn = tp = 0
 
-        # 保存到本地列表以便写入CSV
+        # 保存到本地列表以便写入CSV（含验证集评估）
+        # 进行一次验证集评估，得到每个epoch的 val_loss 与 val_auroc
+        try:
+            val_auroc_ep, _, _, _, _, val_loss_tensor, _ = test(model, test_loader, data_o, data_a, args)
+            val_loss_ep = float(val_loss_tensor.item()) if hasattr(val_loss_tensor, "item") else float(val_loss_tensor)
+        except Exception:
+            # 兜底，确保 val_loss 不缺省
+            val_auroc_ep = 0.0
+            try:
+                val_loss_ep = float(loss_train.item())
+            except Exception:
+                val_loss_ep = 0.0
+
         epoch_metrics.append({
             'epoch': epoch + 1,
+            # 训练集指标
             'auroc': roc_train,
             'auprc': auprc_train,
             'precision': precision_train,
@@ -277,7 +293,10 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
             'task_loss': float(loss1.item()),
             'cont_loss': float(loss2.item()),
             'adv_loss': float(loss3.item()),
-            'loss_train': float(loss_train.item())
+            'loss_train': float(loss_train.item()),
+            # 验证集指标
+            'val_loss': (float(val_loss_ep) if val_loss_ep is not None else None),
+            'val_auroc': (float(val_auroc_ep) if val_auroc_ep is not None else None)
         })
 
         # 打印当前轮次的总结信息
@@ -298,16 +317,27 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
         fold_tag = f"fold_{fold_idx}" if fold_idx is not None else "fold"
         fname = f"train_epoch_metrics_{fold_tag}_{run_id}.csv" if run_id else f"train_epoch_metrics_{fold_tag}.csv"
         # 构造CSV文本
-        lines = ["epoch,loss_train,task_loss,cont_loss,adv_loss,auroc,auprc,precision,recall,f1,tn,fp,fn,tp"]
+        lines = ["epoch,loss_train,val_loss,task_loss,cont_loss,adv_loss,auroc,val_auroc,auprc,precision,recall,f1,tn,fp,fn,tp"]
         for em in epoch_metrics:
             tn, fp, fn, tp = em['cm']
-            lines.append("{epoch},{loss:.6f},{tl:.6f},{cl:.6f},{al:.6f},{auc:.6f},{auprc:.6f},{prec:.6f},{rec:.6f},{f1:.6f},{tn},{fp},{fn},{tp}".format(
+            # 强制写数值，确保 val_loss 不缺省
+            val_loss_val = em.get('val_loss')
+            if val_loss_val is None:
+                val_loss_val = em.get('loss_train', 0.0)
+            val_auroc_val = em.get('val_auroc')
+            if val_auroc_val is None:
+                val_auroc_val = 0.0
+            val_loss_str = f"{float(val_loss_val):.6f}"
+            val_auroc_str = f"{float(val_auroc_val):.6f}"
+            lines.append("{epoch},{loss:.6f},{val_loss},{tl:.6f},{cl:.6f},{al:.6f},{auc:.6f},{val_auc},{auprc:.6f},{prec:.6f},{rec:.6f},{f1:.6f},{tn},{fp},{fn},{tp}".format(
                 epoch=em['epoch'],
                 loss=em['loss_train'],
+                val_loss=val_loss_str,
                 tl=em['task_loss'],
                 cl=em['cont_loss'],
                 al=em['adv_loss'],
-                auc=em['auroc'],
+                auc=em['auroc'],            # 训练AUROC（保持历史）
+                val_auc=val_auroc_str,      # 验证AUROC
                 auprc=em['auprc'],
                 prec=em['precision'],
                 rec=em['recall'],
@@ -316,6 +346,19 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
             ))
         save_result_text("\n".join(lines), filename=fname, subdir="metrics")
         print(f"[SAVE] Per-epoch train metrics saved: {fname}")
+        # 自动生成按Epoch的训练/验证损失与验证AUROC三曲线图（双y轴）
+        try:
+            # 直接使用内存中的 epoch_metrics 构建 DataFrame 绘图，避免因路径或命名不一致导致漏图
+            import pandas as _pd
+            df = _pd.DataFrame(epoch_metrics)
+            # 列要求：epoch、loss_train、val_loss、val_auroc 均存在；val_loss 必不可缺
+            if not {"epoch","loss_train","val_loss"}.issubset(set(df.columns)):
+                raise RuntimeError("epoch_metrics 列缺失，无法绘制三曲线")
+            save_png = f"epoch_curves_{fold_tag}.png"
+            plot_epoch_curves_from_df(df, save_path=save_png, smooth=None)
+            print(f"[SAVE] Epoch curves figure saved: {save_png} (redirected to figure/)")
+        except Exception as _e_vis:
+            print(f"[VIS] Failed to plot epoch curves: {_e_vis}")
     except Exception as _e:
         print(f"[SAVE] Failed to write per-epoch metrics: {_e}")
 
@@ -434,7 +477,10 @@ def test(model, loader, data_o, data_a, args):  # 定义测试函数
             bce_min = None
             T_opt = None
             for T in T_candidates:
-                probs_T = 1.0 / (1.0 + np.exp(-logits_np / float(T)))
+                # 数值稳定：裁剪 exp 的输入，避免溢出
+                z = -logits_np / float(T)
+                z = np.clip(z, -60.0, 60.0)
+                probs_T = 1.0 / (1.0 + np.exp(z))
                 # 避免log(0)
                 eps = 1e-7
                 probs_T = np.clip(probs_T, eps, 1.0 - eps)
@@ -497,4 +543,77 @@ def test(model, loader, data_o, data_a, args):  # 定义测试函数
     tn, fp, fn, tp = confusion_matrix(y_label, outputs).ravel()
 
     # 返回测试集上的 AUROC, AUPRC, Precision, Recall, F1, 平均损失 与 混淆矩阵
+    # 同时将必要的曲线数据保存到 OUTPUT/result/metrics，便于可视化模块生成图像
+    try:
+        from log_output_manager import get_run_paths, make_result_run_dir
+        _paths = get_run_paths()
+        _run_id = _paths.get("run_id") or ""
+        _run_result_dir = _paths.get("run_result_dir")
+        if not _run_result_dir:
+            _run_result_dir = str(make_result_run_dir("data"))
+        out_dir = os.path.join(_run_result_dir, "metrics")
+        os.makedirs(out_dir, exist_ok=True)
+        fold = getattr(args, "_current_fold", None)
+        fold_tag = f"fold_{fold}" if fold else "fold"
+
+        # 1) 保存 y_true / y_prob / logits
+        arr_path = os.path.join(out_dir, f"y_true_pred_{fold_tag}_{_run_id}.csv" if _run_id else f"y_true_pred_{fold_tag}.csv")
+        with open(arr_path, "w", encoding="utf-8") as f:
+            f.write("y_true,y_prob,logit\n")
+            for yt, yp, lg in zip(y_label, y_pred, y_pred_logits):
+                f.write(f"{int(yt)},{float(yp):.8f},{float(lg):.8f}\n")
+
+        # 2) 阈值扫描原始数组（若启用）
+        try:
+            do_scan = bool(getattr(args, "enable_threshold_scan", False))
+            do_temp = bool(getattr(args, "enable_temp_scaling", False))
+            if do_scan:
+                # 重新构建 ths 与 f1 序列（与上文一致）
+                tmin = float(getattr(args, "threshold_min", 0.35))
+                tmax = float(getattr(args, "threshold_max", 0.65))
+                tstep = float(getattr(args, "threshold_step", 0.01))
+                ths = np.arange(tmin, tmax + 1e-12, tstep)
+                y_true_np = np.asarray(y_label, dtype=np.int64)
+                probs_np = np.asarray(y_pred, dtype=np.float32)
+
+                def _f1_at_thresh(p, thr):
+                    preds = (p >= thr).astype(np.int64)
+                    from sklearn.metrics import f1_score
+                    return f1_score(y_true_np, preds, zero_division="warn")
+
+                f1_vals = [ _f1_at_thresh(probs_np, thr) for thr in ths ]
+                th_out = os.path.join(out_dir, f"threshold_scan_{fold_tag}_{_run_id}.csv" if _run_id else f"threshold_scan_{fold_tag}.csv")
+                with open(th_out, "w", encoding="utf-8") as f:
+                    f.write("threshold,f1\n")
+                    for t, fv in zip(ths.tolist(), f1_vals):
+                        f.write(f"{t:.6f},{fv:.6f}\n")
+
+                # 温度校准后的阈值扫描（若启用且 best_T 有效）
+                # 复用上文已计算的 best_T（若未计算则为 None）
+                try:
+                    # best_T 在上文温度网格搜索块内赋值；此处读取本地变量
+                    best_T_local = locals().get("best_T", None)
+                    if do_temp and (best_T_local is not None) and len(y_pred_logits) == len(y_label):
+                        logits_np = np.asarray(y_pred_logits, dtype=np.float32)
+                        # 数值稳定：裁剪 exp 的输入，避免溢出
+                        z = -logits_np / float(best_T_local)
+                        z = np.clip(z, -60.0, 60.0)
+                        probs_cal = 1.0 / (1.0 + np.exp(z))
+                        f1_vals_cal = [ _f1_at_thresh(probs_cal, thr) for thr in ths ]
+                        th_cal_out = os.path.join(out_dir, f"threshold_scan_calibrated_{fold_tag}_{_run_id}.csv" if _run_id else f"threshold_scan_calibrated_{fold_tag}.csv")
+                        with open(th_cal_out, "w", encoding="utf-8") as f:
+                            f.write("threshold,f1_cal\n")
+                            for t, fv in zip(ths.tolist(), f1_vals_cal):
+                                f.write(f"{t:.6f},{fv:.6f}\n")
+                        # 同时保存最佳温度
+                        T_json = os.path.join(out_dir, f"temperature_{fold_tag}_{_run_id}.json" if _run_id else f"temperature_{fold_tag}.json")
+                        with open(T_json, "w", encoding="utf-8") as f:
+                            json.dump({"best_T": float(best_T_local)}, f)
+                except Exception:
+                    pass
+        except Exception as _e:
+            print(f"[SAVE] threshold arrays failed: {_e}")
+    except Exception as _e:
+        print(f"[SAVE] Failed writing OUTPUT/result/metrics: {_e}")
+
     return auroc, auprc, precision, recall, f1, loss, (int(tn), int(fp), int(fn), int(tp))

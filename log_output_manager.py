@@ -347,12 +347,22 @@ def save_cv_datasets(args, total_data, train_data_folds, test_data_folds, base_d
 
 def save_fold_stats_json(fold_stats: list, base_dir: str, filename: str = "fold_stats.json") -> None:
     """
-    将折级统计写入 OUTPUT/result/metrics/{filename}
-    base_dir: 一般为 EM 目录（__file__ 所在目录）
+    将折级统计写入 当前运行目录 的 metrics/{filename}：
+    - 优先使用 run_result_dir/metrics
+    - 若当前 run 目录未建立，则创建后写入
     """
     lg = get_logger("fold_stats")
     try:
-        root_dir = os.path.abspath(os.path.join(base_dir, os.pardir, "OUTPUT", "result", "metrics"))
+        from .log_output_manager import get_run_paths, make_result_run_dir  # 相对导入兼容
+    except Exception:
+        # 退化为本模块作用域可用（若同文件引入）
+        from log_output_manager import get_run_paths, make_result_run_dir  # type: ignore
+    try:
+        paths = get_run_paths() or {}
+        run_dir = paths.get("run_result_dir")
+        if not run_dir:
+            run_dir = str(make_result_run_dir("data"))
+        root_dir = os.path.join(run_dir, "metrics")
         os.makedirs(root_dir, exist_ok=True)
         out_path = os.path.join(root_dir, filename)
         with open(out_path, "w", encoding="utf-8") as f:
