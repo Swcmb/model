@@ -311,54 +311,51 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
             torch.cuda.empty_cache()  # 清空GPU缓存，释放不必要的显存
     print("Optimization Finished!")  # 所有轮次训练完成后，打印优化完成
 
-    # 将每epoch训练指标写入 EM/result 当前运行目录下的CSV
+    # 将每epoch训练指标写入当前 run 的 metrics/ 下（CSV），训练阶段不出图
     try:
-        run_id = (get_run_paths().get('run_id') or '')
-        fold_tag = f"fold_{fold_idx}" if fold_idx is not None else "fold"
-        fname = f"train_epoch_metrics_{fold_tag}_{run_id}.csv" if run_id else f"train_epoch_metrics_{fold_tag}.csv"
-        # 构造CSV文本
-        lines = ["epoch,loss_train,val_loss,task_loss,cont_loss,adv_loss,auroc,val_auroc,auprc,precision,recall,f1,tn,fp,fn,tp"]
+        # 规范化字段并强制 val_loss 非空
+        import pandas as _pd
+        _rows = []
         for em in epoch_metrics:
-            tn, fp, fn, tp = em['cm']
-            # 强制写数值，确保 val_loss 不缺省
+            tn, fp, fn, tp = em.get('cm', (0,0,0,0))
             val_loss_val = em.get('val_loss')
             if val_loss_val is None:
                 val_loss_val = em.get('loss_train', 0.0)
-            val_auroc_val = em.get('val_auroc')
-            if val_auroc_val is None:
-                val_auroc_val = 0.0
-            val_loss_str = f"{float(val_loss_val):.6f}"
-            val_auroc_str = f"{float(val_auroc_val):.6f}"
-            lines.append("{epoch},{loss:.6f},{val_loss},{tl:.6f},{cl:.6f},{al:.6f},{auc:.6f},{val_auc},{auprc:.6f},{prec:.6f},{rec:.6f},{f1:.6f},{tn},{fp},{fn},{tp}".format(
-                epoch=em['epoch'],
-                loss=em['loss_train'],
-                val_loss=val_loss_str,
-                tl=em['task_loss'],
-                cl=em['cont_loss'],
-                al=em['adv_loss'],
-                auc=em['auroc'],            # 训练AUROC（保持历史）
-                val_auc=val_auroc_str,      # 验证AUROC
-                auprc=em['auprc'],
-                prec=em['precision'],
-                rec=em['recall'],
-                f1=em['f1'],
-                tn=tn, fp=fp, fn=fn, tp=tp
-            ))
-        save_result_text("\n".join(lines), filename=fname, subdir="metrics")
-        print(f"[SAVE] Per-epoch train metrics saved: {fname}")
-        # 自动生成按Epoch的训练/验证损失与验证AUROC三曲线图（双y轴）
+            _rows.append({
+                'epoch': int(em.get('epoch')),
+                'loss_train': float(em.get('loss_train', 0.0)),
+                'val_loss': float(val_loss_val),
+                'task_loss': float(em.get('task_loss', 0.0)),
+                'cont_loss': float(em.get('cont_loss', 0.0)),
+                'adv_loss': float(em.get('adv_loss', 0.0)),
+                'auroc': float(em.get('auroc', 0.0)),
+                'val_auroc': float(em.get('val_auroc', 0.0) if em.get('val_auroc') is not None else 0.0),
+                'auprc': float(em.get('auprc', 0.0)),
+                'precision': float(em.get('precision', 0.0)),
+                'recall': float(em.get('recall', 0.0)),
+                'f1': float(em.get('f1', 0.0)),
+                'tn': int(tn), 'fp': int(fp), 'fn': int(fn), 'tp': int(tp),
+            })
+        df_out = _pd.DataFrame(_rows)
+        df_out = df_out[['epoch','loss_train','val_loss','task_loss','cont_loss','adv_loss','auroc','val_auroc','auprc','precision','recall','f1','tn','fp','fn','tp']]
+
+        import log_output_manager as _lom
+        _paths = _lom.get_run_paths() or {}
+        _run_dir = _paths.get("run_result_dir") or str(_lom.make_result_run_dir("data"))
+        _run_id = _paths.get("run_id") or ""
+        fold_tag = f"fold_{fold_idx}" if fold_idx is not None else "fold"
+        fname = f"train_epoch_metrics_{fold_tag}_{_run_id}.csv" if _run_id else f"train_epoch_metrics_{fold_tag}.csv"
+        _metrics_dir = os.path.join(_run_dir, "metrics")
+        os.makedirs(_metrics_dir, exist_ok=True)
+        csv_path = os.path.join(_metrics_dir, fname)
+
+        # 写出 CSV 与 CSV.TXT（兼容）
+        df_out.to_csv(csv_path, index=False, encoding="utf-8")
         try:
-            # 直接使用内存中的 epoch_metrics 构建 DataFrame 绘图，避免因路径或命名不一致导致漏图
-            import pandas as _pd
-            df = _pd.DataFrame(epoch_metrics)
-            # 列要求：epoch、loss_train、val_loss、val_auroc 均存在；val_loss 必不可缺
-            if not {"epoch","loss_train","val_loss"}.issubset(set(df.columns)):
-                raise RuntimeError("epoch_metrics 列缺失，无法绘制三曲线")
-            save_png = f"epoch_curves_{fold_tag}.png"
-            plot_epoch_curves_from_df(df, save_path=save_png, smooth=None)
-            print(f"[SAVE] Epoch curves figure saved: {save_png} (redirected to figure/)")
-        except Exception as _e_vis:
-            print(f"[VIS] Failed to plot epoch curves: {_e_vis}")
+            df_out.to_csv(csv_path + ".txt", index=False, encoding="utf-8")
+        except Exception:
+            pass
+        print(f"[SAVE] Per-epoch train metrics saved: {csv_path} and {csv_path+'.txt'}")
     except Exception as _e:
         print(f"[SAVE] Failed to write per-epoch metrics: {_e}")
 

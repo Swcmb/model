@@ -211,8 +211,14 @@ try:
     for fold in range(1, 6):
         try:
             csv_name = f"train_epoch_metrics_fold_{fold}_{_run_id}.csv"
-            csv_path = os.path.join(_metrics_dir_em, csv_name)
-            if os.path.exists(csv_path):
+            candidates = [
+                os.path.join(_metrics_dir_em, csv_name),
+                os.path.join(_metrics_dir_em, csv_name + ".txt"),
+                os.path.join(_metrics_dir_em, f"train_epoch_metrics_fold_{fold}.csv"),
+                os.path.join(_metrics_dir_em, f"train_epoch_metrics_fold_{fold}.csv.txt"),
+            ]
+            csv_path = next((p for p in candidates if os.path.exists(p)), None)
+            if csv_path:
                 df = load_epoch_metrics_csv(csv_path)
                 # 多损失分解
                 plot_multi_loss_breakdown(df["epoch"].tolist(), df["task_loss"].tolist(), df["cont_loss"].tolist(), df["adv_loss"].tolist(),
@@ -226,6 +232,8 @@ try:
                     save_path=f"epoch_curves_fold_{fold}.png",
                     title="按Epoch的训练/验证损失与验证AUROC曲线"
                 )
+            else:
+                logger.warning(f"[VIS] epoch CSV not found for fold={fold} in {_metrics_dir_em}")
         except Exception as _e:
             logger.warning(f"[VIS] fold {fold} epoch metrics plot skipped: {_e}")
 
