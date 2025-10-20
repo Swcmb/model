@@ -302,7 +302,7 @@ try:
         _fig_dir = os.path.join(_run_dir, "figure")
         files = sorted([os.path.join(_fig_dir, f) for f in os.listdir(_fig_dir) if f.lower().endswith(".png")])
         for p in files:
-            logger.info(f"[VIS] saved: {os.path.abspath(p)}")
+            logger.debug(f"[VIS] saved: {os.path.abspath(p)}")
         logger.info(f"[VIS] All plots saved to {_fig_dir}")
     except Exception as _e_list:
         logger.warning(f"[VIS] list saved files failed: {_e_list}")

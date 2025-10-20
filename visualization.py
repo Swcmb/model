@@ -13,6 +13,24 @@ sns.set(style="whitegrid", context="talk")
 
 # 中文字体设置：优先使用微软雅黑/黑体/宋体，修复负号显示问题
 def _set_chinese_font():
+    # 全局高精度绘图参数（提高分辨率与抗锯齿）
+    try:
+        plt.rcParams.update({
+            "savefig.dpi": 300,           # 保存分辨率
+            "figure.dpi": 120,            # 交互显示分辨率（适中，避免交互过慢）
+            "lines.antialiased": True,    # 抗锯齿
+            "patch.antialiased": True,
+            "axes.linewidth": 1.2,        # 坐标轴线宽
+            "lines.linewidth": 2.0,       # 默认线宽
+            "legend.frameon": True,       # 图例带边框
+            "legend.framealpha": 0.85,    # 图例透明度
+            "pdf.fonttype": 42,           # 兼容性更好的字体嵌入
+            "ps.fonttype": 42
+        })
+    except Exception:
+        # 若更新失败，忽略错误，继续字体设置
+        pass
+    # 中文字体与负号设置
     try:
         # 在 Windows 11 常见可用字体
         plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'SimSun', 'Arial Unicode MS']
@@ -23,7 +41,7 @@ def _set_chinese_font():
         except Exception:
             pass
     except Exception:
-        # 至少修复负号
+        # 至少保证负号正常显示
         plt.rcParams['axes.unicode_minus'] = False
 
 _set_chinese_font()
@@ -37,10 +55,12 @@ def _ensure_dir(path: Optional[str]) -> None:
             os.makedirs(d, exist_ok=True)
 
 
-def _finalize(fig: plt.Figure, save_path: Optional[str] = None, dpi: int = 200) -> None:
-    """保存或展示图像。
-    硬性重定向：若能获取当前 run 的 result_dir，则所有图保存到 OUTPUT/result/<run_name>/figure/<文件名>。
-    否则回退为将路径中的 result 目录映射到 figure 目录。
+def _finalize(fig: plt.Figure, save_path: Optional[str] = None, dpi: int = 300) -> None:
+    """保存或展示图像（增强版：更高 DPI + 自动矢量副本）。
+    硬性重定向：若能获取当前 run 的 result_dir，则统一保存到 <run_dir>/figure/<文件名>。
+    否则将路径中的 /result/ 替换为 /figure/。
+    - 若 save_path 为 PNG/JPG，则额外保存同名 SVG；
+    - 若 save_path 为 SVG，则额外保存同名 PNG（用于快速预览）。
     """
     fig.tight_layout()
     if save_path:
@@ -51,23 +71,37 @@ def _finalize(fig: plt.Figure, save_path: Optional[str] = None, dpi: int = 200) 
                 paths = get_run_paths() or {}
                 run_dir = paths.get("run_result_dir")
                 if not run_dir:
-                    # 若当前 run 目录不存在，则立即创建
                     run_dir = str(make_result_run_dir("data"))
             except Exception:
                 run_dir = None
 
+            # 规范化主保存路径
             if run_dir:
-                # 强制保存到 <run_dir>/figure/<文件名>，避免嵌套时间戳/子目录
                 fname = os.path.basename(str(save_path))
-                save_path_norm = os.path.join(run_dir, "figure", fname)
+                base_target = os.path.join(run_dir, "figure", fname)
             else:
-                # 兜底：仅将 /result/ 替换为 /figure/
                 sp = str(save_path).replace("\\", "/")
                 sp = sp.replace("/result/", "/figure/")
-                save_path_norm = sp.replace("/", os.sep)
+                base_target = sp.replace("/", os.sep)
 
-            _ensure_dir(save_path_norm)
-            fig.savefig(save_path_norm, dpi=dpi, bbox_inches="tight")
+            # 解析扩展名与多格式保存策略
+            root, ext = os.path.splitext(base_target)
+            ext = ext.lower() if ext else ".png"
+            formats = [ext]
+            if ext in [".png", ".jpg", ".jpeg"]:
+                # 栅格 -> 额外保存矢量
+                formats.append(".svg")
+            elif ext == ".svg":
+                # 矢量 -> 额外保存栅格（便于快速查看）
+                formats.append(".png")
+
+            # 依次保存各格式
+            for fext in formats:
+                target = root + fext
+                _ensure_dir(target)
+                # 对于矢量（svg/pdf）dpi影响不大，但保持参数统一
+                fig.savefig(target, dpi=dpi, bbox_inches="tight")
+
             plt.close(fig)
         except Exception:
             # 若保存异常，回退为显示
