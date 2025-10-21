@@ -9,7 +9,7 @@ from torch_geometric.data import Data             # 图数据封装（PyTorch Ge
 
 from utils import *                         # 通用工具（含 BASE_DIR、图构建、归一化等）
 from utils import em_path as _p             # 统一路径解析（简写）
-from layer import load_positive, load_negative_all, sample_negative, attach_labels, apply_augmentation# 样本构建与特征增强
+from layer import load_positive, load_negative_all, sample_negative, apply_augmentation# 样本构建与特征增强
 from calculating_similarity import calculate_GaussianKernel_sim, getRNA_functional_sim, RNA_fusion_sim, dis_fusion_sim# 相似度计算
 from log_output_manager import get_logger, save_cv_datasets, save_fold_stats_json# 日志与数据保存
 
