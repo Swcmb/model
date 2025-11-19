@@ -2,18 +2,39 @@ import random  # 随机数控制（用于批次级对抗种子派生）
 import json  # 用于保存与加载对抗配置
 import os  # 文件保存路径
 import numpy as np  # 数值计算库
-import matplotlib.pyplot as plt  # 绘图库（当前文件中可能未使用）
 import torch  # PyTorch 主库
-import torch.nn as nn  # 神经网络模块
 from torch_geometric.data import Data  # 图数据结构支持
 from layer import apply_augmentation, adversarial_step_multi  # 增强与对抗步骤
 from log_output_manager import save_result_text, get_run_paths  # 日志与结果管理
-from sklearn.metrics import roc_auc_score,roc_curve,average_precision_score,f1_score,auc,precision_score,recall_score,confusion_matrix
-# 可视化：按Epoch绘制 train_loss / val_loss / val_AUROC
+from sklearn.metrics import (roc_auc_score, roc_curve, average_precision_score, 
+                           f1_score, auc, precision_score, recall_score, confusion_matrix)  # 评估指标
+# 可视化：按 Epoch 绘制 train_loss / val_loss / val_AUC
 from visualization import load_epoch_metrics_csv, plot_epoch_curves_from_df
 
+__all__ = ['random', 'json', 'os', 'np', 'torch', 'Data', 'apply_augmentation', 
+           'adversarial_step_multi', 'save_result_text', 'get_run_paths',
+           'roc_auc_score', 'roc_curve', 'average_precision_score', 'f1_score',
+           'auc', 'precision_score', 'recall_score', 'confusion_matrix',
+           'load_epoch_metrics_csv', 'plot_epoch_curves_from_df']
 
-def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, args, fold_idx=None):  # 定义主训练函数，增加fold索引
+
+def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, args, fold_idx=None):  
+    """
+    训练图神经网络模型的主函数
+    
+    Args:
+        model: 待训练的神经网络模型
+        optimizer: 优化器
+        data_o: 原始数据
+        data_a: 对抗数据
+        train_loader: 训练数据加载器
+        test_loader: 测试数据加载器
+        args: 包含训练参数的命令行参数对象
+        fold_idx: 折叠索引，用于交叉验证，默认为None
+    
+    Returns:
+        dict: 包含测试集评估结果的字典，包括AUROC、AUPRC、精确率、召回率、F1分数、损失和混淆矩阵
+    """
     m = torch.nn.Sigmoid()  # 实例化Sigmoid函数，用于将模型输出转换为概率
     loss_fct = torch.nn.BCELoss()  # 实例化二元交叉熵损失函数（用于主任务）
     b_xent = nn.BCEWithLogitsLoss()  # 实例化带Logits的二元交叉熵损失，更稳定（用于对比和对抗损失）
@@ -38,7 +59,7 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
     try:
         run_id = (get_run_paths().get('run_id') or '')
         fold_tag = f"fold_{fold_idx}" if fold_idx is not None else "fold"
-        # ✅ 修复2：统一使用 derive_adv_seed 函数派生种子
+        # 统一使用 derive_adv_seed 函数派生种子
         from utils import derive_adv_seed
         base_adv_seed = derive_adv_seed(args, fold_idx or 0, 0, 0)
 
@@ -78,7 +99,7 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
     except Exception as _e:
         print(f"[SAVE] Failed to write adv config: {_e}")
 
-    # Train model  # 注释：训练模型
+    # 训练模型
     lbl = data_a.y  # 获取对抗数据的标签（用于对比学习）
     print('Start Training...')  # 打印开始训练的信息
     # 记录每个epoch的训练指标（便于保存）
@@ -173,7 +194,7 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
                     l3 = node_loss(lgts, lbl2.float())
                     return args.loss_ratio1 * l1 + args.loss_ratio2 * l2 + args.loss_ratio3 * l3
 
-                # ✅ 修复2：在调用对抗生成前，统一使用 derive_adv_seed 派生种子
+                # 在调用对抗生成前，统一使用 derive_adv_seed 派生种子
                 from utils import derive_adv_seed
                 seed_batch = derive_adv_seed(args, fold_idx or 0, epoch, i)
                 try:
@@ -218,7 +239,7 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
                           f"on_moco={use_moco_adv} clamp=[{getattr(args,'adv_clip_min',float('-inf'))},"
                           f"{getattr(args,'adv_clip_max',float('inf'))}]")
             else:
-                # 保持原有“干净输入”路径
+                # 保持原有"干净输入"路径
                 output, cla_os, cla_os_a, _, logits, log1 = model(data_o, data_a_aug, inp)  # 将数据输入模型，获取多个输出
 
                 log = torch.squeeze(m(output))  # 对主任务输出应用Sigmoid并压缩维度
@@ -359,7 +380,7 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
     except Exception as _e:
         print(f"[SAVE] Failed to write per-epoch metrics: {_e}")
 
-    # Testing  # 注释：测试阶段
+    # 测试阶段
     # 在进入测试前注入当前折信息（用于文件命名）
     try:
         setattr(args, "_current_fold", fold_idx if 'fold_idx' in locals() else getattr(args, "_current_fold", None))
@@ -386,16 +407,38 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
     }
 
 
-def test(model, loader, data_o, data_a, args):  # 定义测试函数
+def test(model, loader, data_o, data_a, args):
+    """
+    测试函数，用于在给定数据上评估模型性能
+    
+    参数:
+        model: 待测试的模型
+        loader: 测试数据加载器
+        data_o: 原始数据
+        data_a: 对抗数据
+        args: 包含配置参数的命名空间对象
+        
+    返回值:
+        auroc: ROC曲线下面积
+        auprc: PR曲线下面积
+        precision: 精确率
+        recall: 召回率
+        f1: F1分数
+        loss: 损失值
+        (tn, fp, fn, tp): 混淆矩阵的四个值组成的元组
+    """
+    # 定义测试函数
 
+    # 准备模型和损失函数
     m = torch.nn.Sigmoid()  # 实例化Sigmoid
     loss_fct = torch.nn.BCELoss()  # 实例化损失函数
     b_xent = nn.BCEWithLogitsLoss()
     ce_loss = nn.CrossEntropyLoss()
     node_loss = nn.BCEWithLogitsLoss()
 
-
-    model.eval()  # 将模型设置为评估模式（会关闭dropout等）
+    # 将模型设置为评估模式（会关闭dropout等）
+    model.eval()
+    # 初始化列表，用于存储预测值和真实标签
     y_pred = []  # 初始化列表，用于存储预测值
     y_pred_logits = []  # 原始未Sigmoid的logits（用于温度校准）
     y_label = []  # 初始化列表，用于存储真实标签
@@ -409,8 +452,10 @@ def test(model, loader, data_o, data_a, args):  # 定义测试函数
     lbl_2 = torch.zeros(1, n_nodes, device=device)
     lbl2 = torch.cat((lbl_1, lbl_2), 1)
 
-    with torch.no_grad():  # 在此代码块中，不计算梯度，以节省计算资源
-        for i, (label, inp) in enumerate(loader):  # 遍历测试数据加载器
+    # 在此代码块中，不计算梯度，以节省计算资源
+    with torch.no_grad():
+        # 遍历测试数据加载器
+        for i, (label, inp) in enumerate(loader):
 
             label = label.to('cuda')  # 固定使用GPU
             # 异常防护：空 batch（如早期调试/数据问题）直接跳过，避免产生 nan
@@ -614,3 +659,110 @@ def test(model, loader, data_o, data_a, args):  # 定义测试函数
         print(f"[SAVE] Failed writing OUTPUT/result/metrics: {_e}")
 
     return auroc, auprc, precision, recall, f1, loss, (int(tn), int(fp), int(fn), int(tp))
+
+"""
+以下是针对提供的代码（`train.py`）的详细解释，从整体架构到关键组件逐一分析：
+
+---
+
+### **1. 整体架构**
+代码实现了一个图神经网络（GNN）的训练和测试流程，主要用于处理图结构数据的分类任务。核心功能包括：
+- **训练阶段**：通过对抗训练和对比学习提升模型鲁棒 。
+- **测试阶段**：评估模型性能并保存结果。
+- **辅助功能**：日志记录、可视化支持、阈值扫描和温度校准。
+
+---
+
+### **2. 关键组件与逻辑**
+
+#### **(1) 导入与初始化**
+- **依赖库**：
+  - `torch` 和 `torch_geometric`：PyTorch 及其图数据处理扩展。
+  - `sklearn.metrics`：用于计算分类指标（如 AUC、F1 等）。
+  - 自定义模块：`layer`（增强和对抗操作）、`log_output_manager`（日志管理）、`visualization`（可视化工具）。
+- **全局变量**：通过 `__all__` 导出常用模块，便于其他脚本调用。
+
+#### **(2) 训练函数 `train_model`**
+- **输入参数**：
+  - `model`：待训练的 GNN 模型。
+  - `optimizer`：优化器（如 Adam）。
+  - `data_o` 和 `data_a`：原始数据和对抗数据（用于对比学习）。
+  - `train_loader` 和 `test_loader`：数据加载器。
+  - `args`：命令行参数（如训练轮数、学习率、对抗配置等）。
+- **核心逻辑**：
+  1. **初始化**：
+     - 损失函数：二元交叉熵（`BCELoss`）、对比损失（`BCEWithLogitsLoss`）。
+     - 设备设置：强制使用 GPU（`cuda`）。
+     - 对抗配置：保存到 JSON 文件（如 `adv_config.json`），便于复现。
+  2. **训练循环**：
+     - **在线增强**：动态生成对抗数据（`apply_augmentation`），支持随机噪声和掩码。
+     - **对抗训练**：
+       - 使用 `adversarial_step_multi` 生成对抗样本。
+       - 计算多任务损失（主任务 + 对比损失 + 节点对抗损失）。
+     - **日志记录**：每 100 个批次打印损失和指标。
+  3. **验证与保存**：
+     - 每个 epoch 结束后评估验证集性能。
+     - 保存训练指标到 CSV 文件（如 `train_epoch_metrics.csv`）。
+
+#### **(3) 测试函数 `test`**
+- **核心逻辑**：
+  1. **模型评估模式**：关闭 Dropout 等训练专用层。
+  2. **批量推理**：计算预测概率和损失。
+  3. **指标计算**：
+     - ROC-AUC、PR-AUC、精确率、召回率、F1 分数。
+     - 混淆矩阵（TN, FP, FN, TP）。
+  4. **高级功能**：
+     - **阈值扫描**：动态选择最佳分类阈值。
+     - **温度校准**：调整模型输出的概率分布，提升校准性。
+  5. **结果保存**：
+     - 原始预测和标签（`y_true_pred.csv`）。
+     - 阈值扫描结果（`threshold_scan.csv`）。
+
+#### **(4) 对抗训练与对比学习**
+- **对抗样本生成**：
+  - 使用 PGD（投影梯度下降）生成对抗扰动。
+  - 支持多视图攻击（如同时扰动原始数据和增强数据）。
+- **对比学习**：
+  - 通过 `MoCo`（动量对比）机制拉近正样本对的距离。
+  - 节点级对抗损失：鼓励模型对节点特征的扰动鲁棒。
+
+#### **(5) 日志与可视化**
+- **日志管理**：
+  - 使用 `log_output_manager` 保存训练配置和指标。
+  - 文件命名包含 `run_id` 和 `fold_idx`，支持多实验管理。
+- **可视化支持**：
+  - 通过 `visualization` 模块绘制训练曲线（如损失和 AUC 变化）。
+
+---
+
+### **3. 关键设计决策**
+1. **多任务损失**：
+   - 结合监督损失、对比损失和对抗损失，提升模型泛化能力。
+   - 权重通过 `args.loss_ratio{1,2,3}` 动态调整。
+2. **动态种子管理**：
+   - 为增强和对抗操作派生稳定种子（`seed + epoch*1000 + iter`），确保可复现性。
+3. **GPU 优化**：
+   - 显式调用 `torch.cuda.empty_cache()` 释放显存，避免内存泄漏。
+4. **鲁棒性增强**：
+   - 对抗训练和在线增强提升模型对输入扰动的鲁棒性。
+
+---
+
+### **4. 亮点与最佳实践**
+1. **模块化设计**：
+   - 功能分块清晰（训练、测试、日志、可视化），便于维护。
+2. **可复现性**：
+   - 保存完整的对抗配置和随机种子。
+3. **高级调优**：
+   - 支持阈值扫描和温度校准，优化分类性能。
+4. **异常处理**：
+   - 对空批次和无效输入进行防护（如跳过 `numel() == 0` 的批次）。
+
+---
+
+### **5. 总结**
+这段代码实现了一个高效的图神经网络训练框架，结合了对抗训练和对比学习的最新实践。其核心优势在于：
+- **灵活性**：通过 `args` 参数支持多种训练模式（如静态/动态增强）。
+- **鲁棒性**：对抗训练和动态增强提升模型在噪声环境下的表现。
+- **可扩展性**：模块化设计便于集成新功能（如其他损失函数或评估指标）。
+"""

@@ -1,5 +1,85 @@
-import argparse  # 命令行参数解析
+"""
+构建并解析实验参数，返回包含所有设置的命名空间对象。
 
+Args:
+    --seed (int): 随机种子，默认 0。
+    --file (str): 正样本文件（--in_file 的别名），默认 "dataset1/LDA.edgelist"。
+    --neg_sample (str): 未知关联（负样本）文件路径，默认 "dataset1/non_LDA.edgelist"。
+    --validation_type (str): 交叉验证类型，默认 "5_cv1"，可选 ['5_cv1', '5_cv2', '5-cv1', '5-cv2']。
+    --task_type (str): 任务类型，默认 "LDA"，可选 ['LDA', 'MDA', 'LMI']。
+    --feature_type (str): 初始节点特征类型，默认 "normal"，可选 ['one_hot', 'uniform', 'normal', 'position']。
+    --noise_std (float): 高斯噪声标准差，默认 0.01。
+    --mask_rate (float): 列掩蔽比例，默认 0.1。
+    --augment_seed (int): 增强随机种子，默认 None。
+    --augment_mode (str): 增强模式，默认 "static"，可选 ['static', 'online']。
+    --augment (str): 增强方式，多个增强用逗号分隔，默认 "random_permute_features,attribute_mask,noise_then_mask"。
+    --lr (float): 学习率，默认 5e-4。
+    --learning_rate (float): --lr 的别名。
+    --dropout (float): Dropout 比例，默认 0.1。
+    --weight_decay (float): 权重衰减（L2 正则），默认 5e-4。
+    --batch (int): 批大小，默认 25。
+    --epochs (int): 训练轮数，默认 1。
+    --loss_ratio1 (float): 任务1损失权重，默认 1。
+    --loss_ratio2 (float): 任务2损失权重，默认 0.5。
+    --loss_ratio3 (float): 任务3损失权重，默认 0.5。
+    --dimensions (int): 初始特征维度 d，默认 256。
+    --embed_dim (int): --dimensions 的别名。
+    --hidden1 (int): 编码器第 1 层隐藏维度，默认 128。
+    --hidden2 (int): 编码器第 2 层隐藏维度，默认 64。
+    --decoder1 (int): 解码器第 1 层隐藏维度，默认 512。
+    --gat_heads (int): GAT 编码器的注意力头数，默认 4。
+    --gt_heads (int): Graph Transformer 编码器的注意力头数，默认 4。
+    --fusion_heads (int): 对偶融合的多头注意力头数，默认 4。
+    --moco_queue (int): MoCo 队列长度，默认 4096。
+    --moco_momentum (float): MoCo 动量 m，默认 0.999。
+    --moco_t (float): MoCo 温度 T，默认 0.2。
+    --proj_dim (int): 投影维度，默认随 hidden2。
+    --queue_warmup_steps (int): 队列预热步数，默认 0。
+    --moco_debug (int): 轻量级 MoCo 调试日志开关，默认 0。
+    --threads (int): 后端线程上限，默认 32。
+    --num_workers (int): DataLoader workers，默认 -1。
+    --prefetch_factor (int): DataLoader 预取因子，默认 4。
+    --chunk_size (int): CPU 任务通用切片大小，默认 0。
+    --similarity_threshold (float): 图构建中的相似度阈值，默认 0.5。
+    --alpha (float): 监督任务权重（BCE），--loss_ratio1 别名，默认 1.0。
+    --beta (float): 对比任务权重（InfoNCE/CE），--loss_ratio2 别名，默认 0.5。
+    --gamma (float): 节点对抗任务权重（BCEWithLogits），--loss_ratio3 别名，默认 0.5。
+    --save_datasets (bool): 是否保存构建的数据集，默认 False。
+    --save_format (str): 数据保存格式，默认 "npy"，可选 ['npy', 'txt']。
+    --save_dir_prefix (str): 保存目录前缀，默认 "result/data"。
+    --run_name (str): 运行名称，默认 None。
+    --shutdown (bool): 仅 Linux：运行结束后关机，默认 False。
+    --adv_mode (str): 对抗模式，默认 "none"，可选 ['none', 'mgraph']。
+    --adv_norm (str): 对抗范数，默认 "linf"，可选 ['linf', 'l2']。
+    --adv_eps (float): 对抗总预算 epsilon，默认 0.01。
+    --adv_alpha (float): 单步步长 alpha，默认 0.005。
+    --adv_steps (int): PGD 步数，默认 0。
+    --adv_rand_init (bool): 是否随机初始化对抗增量，默认 False。
+    --adv_project (bool): 每步后是否投影回 epsilon-ball，默认 True。
+    --adv_agg (str): 批内多图梯度聚合，默认 "mean"，可选 ['mean', 'sum', 'max']。
+    --adv_budget (str): 跨图预算方式，默认 "shared"，可选 ['shared', 'independent']。
+    --adv_use_amp (bool): 对抗生成是否启用 AMP，默认 False。
+    --adv_on_moco (bool): 对抗输入是否送入 MoCo/对比分支，默认 False。
+    --adv_seed (int): 对抗生成随机种子，默认 None。
+    --adv_clip_min (float): 扰动后的最小裁剪值，默认 -inf。
+    --adv_clip_max (float): 扰动后的最大裁剪值，默认 +inf。
+    --adv_warmup_end (int): PGD启用的起始epoch，默认 3。
+    --enable_threshold_scan (bool): 是否启用逐折阈值扫描，默认 True。
+    --threshold_min (float): 阈值扫描下界，默认 0.35。
+    --threshold_max (float): 阈值扫描上界，默认 0.65。
+    --threshold_step (float): 阈值扫描步长，默认 0.01。
+    --enable_temp_scaling (bool): 是否启用温度校准，默认 True。
+    --temp_grid_min (float): 温度校准网格下界 T_min，默认 0.5。
+    --temp_grid_max (float): 温度校准网格上界 T_max，默认 3.0。
+    --temp_grid_num (int): 温度校准网格点数，默认 26。
+    --kfold_recompute (bool): 按折仅用训练集重算预处理/相似度/EM，默认 True。
+    --kfold_cache (bool): 按 {fold, adv_hash, epoch, iter} 可选缓存对抗样本，默认 False。
+
+Returns:
+    argparse.Namespace: 包含所有解析参数的命名空间对象。
+"""
+
+import argparse  # 命令行参数解析
 
 def settings():
     """

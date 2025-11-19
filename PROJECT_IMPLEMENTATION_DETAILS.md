@@ -440,3 +440,159 @@ else:
   loss_total = α*l1 + β*l2 + γ*l3
   ```
   融合反传与优化
+
+
+
+```mermaid
+flowchart TD
+    A[开始] --> B[初始化MoCoV2MultiView]
+    
+    subgraph B [模型初始化]
+        B1[创建共享Query投影头]
+        B2[为每个视图创建独立Key投影头]
+        B3[初始化各视图的队列和指针]
+    end
+    
+    B --> C[输入: q_embed, k_embeds]
+    C --> D["处理Query嵌入<br/>q = normalize(q_proj(q_embed))"]
+    
+    D --> E[动量更新Key编码器]
+    subgraph E [动量更新]
+        E1[遍历所有Key投影头]
+        E2["param_k = m*param_k + (1-m)*param_q"]
+    end
+    
+    E --> F[初始化logits_list, targets_list]
+    F --> G[循环处理每个视图]
+    
+    subgraph G [处理每个视图i]
+        G1["处理当前视图Key嵌入<br/>k = normalize(k_projs[i](k_embed))"]
+        G2[计算正样本相似度<br/>l_pos = q·k]
+        
+        G2 --> G3{队列预热阶段?}
+        G3 -->|是| G4[使用批次内负样本]
+        G3 -->|否| G5[使用队列负样本]
+        
+        subgraph G4 [批次内负样本]
+            G4A[sim = q @ k.T]
+            G4B[创建掩码mask]
+            G4C["l_neg = sim[mask]"]
+        end
+        
+        subgraph G5 [队列负样本]
+            G5A[l_neg = q @ queue_i]
+        end
+        
+        G4 --> G6
+        G5 --> G6
+        
+        G6["拼接相似度<br/>logits = cat[l_pos, l_neg]/T"]
+        G6 --> G7[创建targets<br/>全0向量]
+        G6 --> G8{非预热阶段?}
+        G8 -->|是| G9[更新队列i]
+        
+        G7 --> G10[保存到列表]
+        G9 --> G10
+        G10 --> G11[结束当前视图]
+    end
+    
+    G --> H[计算总损失]
+    subgraph H [损失计算]
+        H1[对各视图计算交叉熵损失]
+        H2["loss = mean(losses)"]
+    end
+    
+    H --> I[返回loss, logits_list, targets_list]
+    I --> J[结束]
+    
+    %% 队列更新子流程
+    subgraph G9 [更新队列]
+        K1[获取当前队列指针ptr]
+        K2["queue_i[:, ptr:ptr+batch] = keys.T"]
+        K3["ptr = (ptr + batch) % K"]
+        K4[更新queue_ptr_i]
+    end
+```
+
+```mermaid
+graph TD
+    A[监督学习流程] --> B[数据加载与预处理]
+    A --> C[模型架构与组件]
+    A --> D[监督学习训练流程]
+    
+    B --> B1[数据来源与结构]
+    B --> B2[数据加载流程]
+    B --> B3[数据预处理步骤]
+    
+    B1 --> B11[边列表文件]
+    B1 --> B12[相似度矩阵]
+    B1 --> B13[名称文件]
+    B1 --> B14[负样本文件]
+    
+    B2 --> B21[读取边列表构建邻接矩阵]
+    B2 --> B22[读取节点特征]
+    B2 --> B23[划分训练集测试集]
+    B2 --> B24[创建DataLoader对象]
+    
+    B3 --> B31[特征标准化]
+    B3 --> B32[图结构处理]
+    B3 --> B33[负样本生成]
+    B3 --> B34[交叉验证分割]
+    
+    C --> C1[核心模型结构]
+    C --> C2[监督学习组件]
+    C --> C3[模型参数设置]
+    
+    C1 --> C11[图注意力网络 GAT]
+    C1 --> C12[图变换器 GT]
+    C1 --> C13[融合层]
+    
+    C2 --> C21[编码器]
+    C2 --> C22[分类器]
+    C2 --> C23[损失函数]
+    C2 --> C24[优化器]
+    
+    C3 --> C31[嵌入维度]
+    C3 --> C32[学习率]
+    C3 --> C33[权重衰减]
+    C3 --> C34[训练轮数]
+    C3 --> C35[损失函数权重]
+    
+    D --> D1[训练主循环]
+    D1 --> D11[设置训练模式]
+    D1 --> D12[遍历训练批次]
+    D1 --> D13[前向传播计算预测]
+    D1 --> D14[计算监督损失]
+    D1 --> D15[反向传播更新参数]
+    D1 --> D16[验证集评估]
+    
+    %% 数据加载函数调用
+    B21 --> B211[load_data args]
+    B211 --> B212[data_o_folds, data_a_folds, train_loaders, test_loaders]
+    
+    %% 模型实例化
+    C11 --> C111[Create_model args]
+    C111 --> C112[model, optimizer]
+    
+    %% 参数配置
+    C31 --> C311[settings]
+    C311 --> C312[args]
+    
+    %% 训练函数调用
+    D1 --> D101[train_model]
+    D101 --> D102[fold_results]
+    
+    %% 样式定义
+    classDef data fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef model fill:#f3e5f5,stroke:#4a148c,stroke-width:2px;
+    classDef training fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px;
+    classDef function fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    
+    class B11,B12,B13,B14 data;
+    class C11,C12,C13,C21,C22,C23,C24 model;
+    class D11,D12,D13,D14,D15,D16 training;
+    class B211,C111,C311,D101 function;
+```
+
+
+

@@ -24,15 +24,34 @@ _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
 
 def _ensure_dirs() -> None:
+    """
+    确保日志和结果目录存在，如果不存在则创建它们。
+    """
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     _RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _timestamp() -> str:
+    """
+    获取当前时间戳，格式为 YYYYMMDD_HHMMSS。
+    
+    Returns:
+        str: 格式化的时间戳字符串
+    """
     return time.strftime("%Y%m%d_%H%M%S")
 
 
 def _compose_log_filename(run_name: Optional[str], run_id: str) -> str:
+    """
+    构造日志文件名。
+    
+    Args:
+        run_name (Optional[str]): 运行名称，用于标识特定运行实例
+        run_id (str): 运行ID，唯一标识一次运行
+        
+    Returns:
+        str: 构造好的日志文件名
+    """
     # 日志命名：EM_{run_name}_YYYYMMDD_HHMMSS.log 或 EM_YYYYMMDD_HHMMSS.log
     prefix = "EM"
     if run_name:
@@ -121,12 +140,26 @@ class _StdToLogger:
     将写入的文本仅写入 logger（不再直写原stdout/stderr），避免控制台重复行。
     """
     def __init__(self, logger: logging.Logger, level: int, original_stream):
+        """
+        初始化 StdToLogger 实例。
+        
+        Args:
+            logger (logging.Logger): 要写入的日志记录器
+            level (int): 日志级别
+            original_stream: 原始流对象
+        """
         self.logger = logger
         self.level = level
         self.original_stream = original_stream
         self._buffer = ""
 
     def write(self, msg):
+        """
+        将消息写入日志缓冲区，并在遇到换行符时处理完整行。
+        
+        Args:
+            msg (str): 要写入的消息
+        """
         # 将完整行写入日志
         self._buffer += msg
         while "\n" in self._buffer:
@@ -139,6 +172,9 @@ class _StdToLogger:
                     self.logger.info(line)
 
     def flush(self):
+        """
+        刷新方法（空实现）。
+        """
         pass
 
 
@@ -196,6 +232,12 @@ def get_run_paths() -> dict:
 
 
 def _ensure_run_dir() -> Path:
+    """
+    确保运行目录存在，如果不存在则创建默认的数据运行目录。
+    
+    Returns:
+        Path: 运行目录路径
+    """
     if _RUN_RESULT_DIR is None:
         return make_result_run_dir("data")
     return _RUN_RESULT_DIR
@@ -328,6 +370,13 @@ def save_cv_datasets(args, total_data, train_data_folds, test_data_folds, base_d
     - 输出目录：{base_dir}/{args.save_dir_prefix}_YYYYmmdd_HHMMSS
     - 文件：total_data.{fmt}、train_fold_i.{fmt}、test_fold_i.{fmt}
     依赖：label_annotation.save_dataset（延迟导入以避免循环）
+    
+    Args:
+        args: 包含配置参数的对象，需要有 save_dir_prefix 属性
+        total_data: 完整数据集
+        train_data_folds: 训练数据折叠列表
+        test_data_folds: 测试数据折叠列表
+        base_dir (str): 基础目录路径
     """
     lg = get_logger("save_dataset")
     try:
@@ -350,6 +399,11 @@ def save_fold_stats_json(fold_stats: list, base_dir: str, filename: str = "fold_
     将折级统计写入 当前运行目录 的 metrics/{filename}：
     - 优先使用 run_result_dir/metrics
     - 若当前 run 目录未建立，则创建后写入
+    
+    Args:
+        fold_stats (list): 折叠统计数据列表
+        base_dir (str): 基础目录路径
+        filename (str): 保存的文件名，默认为 "fold_stats.json"
     """
     lg = get_logger("fold_stats")
     try:

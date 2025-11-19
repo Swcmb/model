@@ -1,4 +1,6 @@
-import os, sys  # 系统交互（环境变量、路径等）
+import os
+import sys
+
 # 让以 'python model/main.py' 运行时也能按包导入
 try:
     ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -6,15 +8,23 @@ try:
         sys.path.insert(0, ROOT)
 except Exception:
     pass
-import torch  # PyTorch 深度学习框架
-import numpy as np  # 科学计算与数组操作
-from parms_setting import settings  # 参数与超参数设置
-from utils import set_global_seed  # 随机性统一设置
-from data_preprocess import load_data, get_fold_data  # 数据加载与折叠划分
-from instantiation import Create_model  # 模型实例化
-from train import train_model  # 训练流程
 
+import torch
+import numpy as np
+
+# 参数与超参数设置
+from parms_setting import settings
+# 随机性统一设置
+from utils import set_global_seed
+# 数据加载与折叠划分
+from data_preprocess import load_data, get_fold_data
+# 模型实例化
+from instantiation import Create_model
+# 训练流程
+from train import train_model
+# 日志管理
 from log_output_manager import *
+
 # 可视化
 from visualization import (
     load_epoch_metrics_csv,
@@ -36,87 +46,93 @@ from visualization import (
 
 # 性能优化相关函数已迁移至 autodl.py
 
-# 初始化集中日志（文件+控制台），日志开头记录完整命令
-# 先解析全部参数（含 run_name、shutdown）
 args = settings()
-# 验证早停设置：若未在参数中提供则注入默认值，使阶段B/C训练受益
+# 如果args中没有early_stop_patience属性，则设置默认值为3
 if not hasattr(args, "early_stop_patience"):
     args.early_stop_patience = 3
+# 如果args中没有early_stop_min_delta属性，则设置默认值为0.0
 if not hasattr(args, "early_stop_min_delta"):
     args.early_stop_min_delta = 0.0
-# 采用验证集 AUPRC 作为早停指标（train_model 内部应读取 args 使用；未使用则不影响）
+# 如果args中没有early_stop_metric属性，则设置默认值为"auprc"
 if not hasattr(args, "early_stop_metric"):
     args.early_stop_metric = "auprc"
 
+# 获取CUDA可见设备设置，默认为"0"
+cuda_visible_devices = getattr(args, "cuda_visible_devices", "0")
+# 设置环境变量CUDA_VISIBLE_DEVICES
+os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
 
-# 已移除自动并行环境初始化（按反馈不要性能增强）
-
-# 初始化集中日志（文件+控制台），带 run_name
+# 初始化日志记录器
 logger = init_logging(run_name=args.run_name)
-# 重定向所有 print 到日志，同时保留控制台输出
+# 重定向print函数输出到日志
 redirect_print(True)
-# 创建当前运行结果目录（data_时间戳）并记录
+# 创建结果运行目录
 make_result_run_dir("data")
 logger.info("Initialized logging and result directory.")
 
-
-# 将后续 print 重定向到 logger.info，避免控制台重复输出
 def _print_to_logger(*args, **kwargs):
+    """
+    将print函数的输出重定向到日志记录器
+    
+    Args:
+        *args: 任意数量的位置参数，要打印的消息
+        **kwargs: 任意数量的关键字参数
+    """
     try:
         msg = " ".join(str(x) for x in args)
     except Exception:
         msg = " ".join(map(str, args))
     logger.info(msg)
+# 重写内置print函数，使其输出到日志记录器
 print = _print_to_logger
 
-# 设置程序使用的GPU设备
-# "CUDA_VISIBLE_DEVICES"是一个环境变量，用于指定哪些GPU可以被CUDA应用程序看到
-# "0"表示只使用系统中编号为0的GPU
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-
-# parameters setting  # 注释：参数设置（已提前解析，此处无需重复）
-# args 已在日志初始化前由 settings() 获取
-
-# 固定使用 CUDA，不再进行可用性检查
-args.cuda = True
-logger.info("Using CUDA: True")
-logger.info(f"CUDA device count: {torch.cuda.device_count()}")
-logger.info(f"Current CUDA device: {torch.cuda.current_device()}")
-logger.info(f"CUDA device name: {torch.cuda.get_device_name()}")
-# 统一随机性：一次性在入口设置（含 Python/NumPy/PyTorch/CUDA/cuDNN）
+# 检查CUDA是否可用，并设置args.cuda属性
+args.cuda = torch.cuda.is_available()
+if args.cuda:
+    # CUDA可用时记录相关信息
+    logger.info("Using CUDA: True")
+    logger.info(f"CUDA device count: {torch.cuda.device_count()}")
+    logger.info(f"Current CUDA device: {torch.cuda.current_device()}")
+    try:
+        logger.info(f"CUDA device name: {torch.cuda.get_device_name()}")
+    except Exception:
+        logger.info("Could not get CUDA device name")
+else:
+    # CUDA不可用时记录相关信息
+    logger.info("Using CUDA: False - CUDA is not available")
+# 设置全局随机种子
 set_global_seed(int(getattr(args, "seed", 0)))
 
 # 打印增强配置汇总
 try:
-    _aug = getattr(args, "augment", "random_permute_features")
-    _mode = getattr(args, "augment_mode", "static") if hasattr(args, "augment_mode") else "static"
-    _noise = getattr(args, "noise_std", 0.01)
-    _mask = getattr(args, "mask_rate", 0.1)
-    _aseed = getattr(args, "augment_seed", None)
+    aug = getattr(args, "augment", "random_permute_features")
+    mode = getattr(args, "augment_mode", "static") if hasattr(args, "augment_mode") else "static"
+    noise = getattr(args, "noise_std", 0.01)
+    mask = getattr(args, "mask_rate", 0.1)
+    aseed = getattr(args, "augment_seed", None)
     logger.info("=== Augmentation Config ===")
+    
     try:
-        _aug_str = ",".join(_aug) if isinstance(_aug, (list, tuple)) else str(_aug)
+        aug_str = ",".join(aug) if isinstance(aug, (list, tuple)) else str(aug)
     except Exception:
-        _aug_str = str(_aug)
-    # 额外的人类可读提示：单/多增强
+        aug_str = str(aug)
+        
     try:
-        if isinstance(_aug, (list, tuple)):
-            print(f"[AUG CONFIG] Multiple augmentations detected: {', '.join(map(str, _aug))}")
+        if isinstance(aug, (list, tuple)):
+            print(f"[AUG CONFIG] Multiple augmentations detected: {', '.join(map(str, aug))}")
         else:
-            print(f"[AUG CONFIG] Single augmentation: {_aug}")
+            print(f"[AUG CONFIG] Single augmentation: {aug}")
     except Exception:
         pass
-    logger.info(f"augment={_aug_str} | mode={_mode} | noise_std={_noise} | mask_rate={_mask} | augment_seed={_aseed} (None means seed+fold for static)")
+        
+    logger.info(f"augment={aug_str} | mode={mode} | noise_std={noise} | mask_rate={mask} | augment_seed={aseed} (None means seed+fold for static)")
     logger.info("===========================")
-except Exception as _e:
-    logger.info(f"[AUGMENT] config print skipped due to: {_e}")
+except Exception as e:
+    logger.info(f"[AUGMENT] config print skipped due to: {e}")
 
 
-# load data  # 注释：加载数据
-# 调用load_data函数，传入参数对象args
-# 该函数会返回处理好的图数据对象（原始图和对抗图）以及所有折的训练和测试数据加载器
 data_o_folds, data_a_folds, train_loaders, test_loaders = load_data(args)
 
 # 存储每一折的结果
@@ -145,11 +161,13 @@ for fold in range(5):
 # 计算所有折的平均结果
 logger.info("=== 5-Fold Cross Validation Results ===")
 if all_fold_results:
+    # 提取各折的评估指标
     aurocs = [result['auroc'] for result in all_fold_results]
     auprcs = [result['auprc'] for result in all_fold_results]
     f1s = [result['f1'] for result in all_fold_results]
     losses = [result['loss'] for result in all_fold_results]
     
+    # 输出平均指标及标准差
     logger.info(f"AUROC: {np.mean(aurocs):.4f} ± {np.std(aurocs):.4f}")
     logger.info(f"AUPRC: {np.mean(auprcs):.4f} ± {np.std(auprcs):.4f}")
     logger.info(f"F1-Score: {np.mean(f1s):.4f} ± {np.std(f1s):.4f}")
@@ -159,7 +177,7 @@ if all_fold_results:
     _run_id = _paths.get("run_id") or ""
     _summary_lines = [
         "5-Fold Cross Validation Summary",
-        f"AUROC: {np.mean(aurocs):.4f} ± {np.std(aurocs):.4f}",
+        f"AUROC: {np.mean(aurocs):.4f} ± {np.std(auprcs):.4f}",
         f"AUPRC: {np.mean(auprcs):.4f} ± {np.std(auprcs):.4f}",
         f"F1-Score: {np.mean(f1s):.4f} ± {np.std(f1s):.4f}",
         f"Loss: {np.mean(losses):.4f} ± {np.std(losses):.4f}"
@@ -178,8 +196,10 @@ else:
     logger.info("No results collected.")
 # 追加精度/召回与混淆矩阵的最终汇总保存到 EM/result/metrics，并打印
 try:
+    # 计算精确率和召回率的平均值及标准差
     precisions = [result.get('precision', 0.0) for result in all_fold_results]
     recalls = [result.get('recall', 0.0) for result in all_fold_results]
+    # 累加所有折的混淆矩阵
     cm_sum = np.array([0,0,0,0], dtype=np.int64)
     for result in all_fold_results:
         tn, fp, fn, tp = result.get('cm', (0,0,0,0))
@@ -200,6 +220,96 @@ except Exception as _e:
     logger.warning(f"Failed to save extra metrics: {_e}")
 
 # ===== 自动生成可视化图像输出到 OUTPUT/result 下 =====
+def plot_fold_epoch_metrics(fold, _run_id, _metrics_dir_em):
+    """
+    绘制指定折数的训练epoch指标图表
+    
+    该函数会查找对应折数的训练指标CSV文件，如果找到则生成多种可视化图表，
+    包括损失分解图、各项指标柱状图以及训练曲线图等。
+    
+    Args:
+        fold (int): 当前处理的折数（1-5）
+        _run_id (str): 运行标识符，用于定位特定运行的文件
+        _metrics_dir_em (str): 指标文件所在目录路径
+    """
+    try:
+        csv_name = f"train_epoch_metrics_fold_{fold}_{_run_id}.csv"
+        candidates = [
+            os.path.join(_metrics_dir_em, csv_name),
+            os.path.join(_metrics_dir_em, csv_name + ".txt"),
+            os.path.join(_metrics_dir_em, f"train_epoch_metrics_fold_{fold}.csv"),
+            os.path.join(_metrics_dir_em, f"train_epoch_metrics_fold_{fold}.csv.txt"),
+        ]
+        csv_path = next((p for p in candidates if os.path.exists(p)), None)
+        if csv_path:
+            df = load_epoch_metrics_csv(csv_path)
+            # 多损失分解
+            plot_multi_loss_breakdown(df["epoch"].tolist(), df["task_loss"].tolist(), df["cont_loss"].tolist(), df["adv_loss"].tolist(),
+                                      stacked=False, save_path=f"loss_breakdown_fold_{fold}.png")
+            # 每epoch指标柱状
+            plot_epoch_metrics_bar(df, metrics=["auroc", "auprc", "f1"],
+                                   save_path=f"epoch_metrics_bar_fold_{fold}.png")
+            # 按Epoch三曲线：train_loss/val_loss/val_AUROC（双y轴）
+            plot_epoch_curves_from_df(
+                df,
+                save_path=f"epoch_curves_fold_{fold}.png",
+                title="按Epoch的训练/验证损失与验证AUROC曲线"
+            )
+        else:
+            logger.warning(f"[VIS] epoch CSV not found for fold={fold} in {_metrics_dir_em}")
+    except Exception as _e:
+        logger.warning(f"[VIS] fold {fold} epoch metrics plot skipped: {_e}")
+
+def plot_fold_test_curves(fold, _run_id, _metrics_dir_out):
+    """
+    绘制指定折数的测试阶段曲线图表
+    
+    该函数会生成ROC曲线、PR曲线、校准曲线等多种评估图表，
+    并检查是否存在温度缩放参数来绘制温度缩放效果图。
+    
+    Args:
+        fold (int): 当前处理的折数（1-5）
+        _run_id (str): 运行标识符，用于定位特定运行的文件
+        _metrics_dir_out (str): 输出指标文件所在目录路径
+    """
+    fold_tag = f"fold_{fold}"
+    try:
+        arr_csv = os.path.join(_metrics_dir_out, f"y_true_pred_{fold_tag}_{_run_id}.csv")
+        if os.path.exists(arr_csv):
+            import pandas as _pd
+            arr_df = _pd.read_csv(arr_csv)
+            y_true = arr_df["y_true"].astype(int).tolist()
+            y_prob = arr_df["y_prob"].astype(float).tolist()
+            logits = arr_df["logit"].astype(float).tolist()
+            # ROC / PR / 校准
+            plot_roc_curve(y_true, y_prob, save_path=f"roc_fold_{fold}.png")
+            plot_pr_curve(y_true, y_prob, save_path=f"pr_fold_{fold}.png")
+            plot_calibration_curve(y_true, y_prob, save_path=f"calibration_fold_{fold}.png")
+            # 温度缩放效果（若有最佳T）
+            import json as _json
+            T_json = os.path.join(_metrics_dir_out, f"temperature_{fold_tag}_{_run_id}.json")
+            T_opt = None
+            if os.path.exists(T_json):
+                with open(T_json, "r", encoding="utf-8") as f:
+                    T_opt = float(_json.load(f).get("best_T"))
+            plot_temperature_scaling_effect(y_true, logits, T_opt, save_path=f"temperature_effect_fold_{fold}.png")
+        # 阈值扫描
+        th_csv = os.path.join(_metrics_dir_out, f"threshold_scan_{fold_tag}_{_run_id}.csv")
+        if os.path.exists(th_csv):
+            import pandas as _pd
+            th_df = _pd.read_csv(th_csv)
+            plot_threshold_scan(th_df["threshold"].tolist(), th_df["f1"].tolist(),
+                                save_path=f"threshold_scan_fold_{fold}.png")
+        th_cal_csv = os.path.join(_metrics_dir_out, f"threshold_scan_calibrated_{fold_tag}_{_run_id}.csv")
+        if os.path.exists(th_cal_csv):
+            import pandas as _pd
+            th_df2 = _pd.read_csv(th_cal_csv)
+            plot_threshold_scan(th_df2["threshold"].tolist(), th_df2["f1_cal"].tolist(),
+                                save_path=f"threshold_scan_calibrated_fold_{fold}.png",
+                                title="F1 vs. 阈值扫描（温度校准后）")
+    except Exception as _e:
+        logger.warning(f"[VIS] fold {fold} test curves plot skipped: {_e}")
+
 try:
     from log_output_manager import get_run_paths, make_result_run_dir
     _paths = get_run_paths()
@@ -209,74 +319,12 @@ try:
     _metrics_dir_em = os.path.join(_run_dir, "metrics")
     # 1) 每折：训练epoch指标（loss/分项/auroc/auprc/f1）
     for fold in range(1, 6):
-        try:
-            csv_name = f"train_epoch_metrics_fold_{fold}_{_run_id}.csv"
-            candidates = [
-                os.path.join(_metrics_dir_em, csv_name),
-                os.path.join(_metrics_dir_em, csv_name + ".txt"),
-                os.path.join(_metrics_dir_em, f"train_epoch_metrics_fold_{fold}.csv"),
-                os.path.join(_metrics_dir_em, f"train_epoch_metrics_fold_{fold}.csv.txt"),
-            ]
-            csv_path = next((p for p in candidates if os.path.exists(p)), None)
-            if csv_path:
-                df = load_epoch_metrics_csv(csv_path)
-                # 多损失分解
-                plot_multi_loss_breakdown(df["epoch"].tolist(), df["task_loss"].tolist(), df["cont_loss"].tolist(), df["adv_loss"].tolist(),
-                                          stacked=False, save_path=f"loss_breakdown_fold_{fold}.png")
-                # 每epoch指标柱状
-                plot_epoch_metrics_bar(df, metrics=["auroc", "auprc", "f1"],
-                                       save_path=f"epoch_metrics_bar_fold_{fold}.png")
-                # 按Epoch三曲线：train_loss/val_loss/val_AUROC（双y轴）
-                plot_epoch_curves_from_df(
-                    df,
-                    save_path=f"epoch_curves_fold_{fold}.png",
-                    title="按Epoch的训练/验证损失与验证AUROC曲线"
-                )
-            else:
-                logger.warning(f"[VIS] epoch CSV not found for fold={fold} in {_metrics_dir_em}")
-        except Exception as _e:
-            logger.warning(f"[VIS] fold {fold} epoch metrics plot skipped: {_e}")
+        plot_fold_epoch_metrics(fold, _run_id, _metrics_dir_em)
 
     # 2) 测试阶段曲线：从 OUTPUT/result/metrics 读取
     _metrics_dir_out = os.path.join(_run_dir, "metrics")
     for fold in range(1, 6):
-        fold_tag = f"fold_{fold}"
-        try:
-            arr_csv = os.path.join(_metrics_dir_out, f"y_true_pred_{fold_tag}_{_run_id}.csv")
-            if os.path.exists(arr_csv):
-                import pandas as _pd
-                arr_df = _pd.read_csv(arr_csv)
-                y_true = arr_df["y_true"].astype(int).tolist()
-                y_prob = arr_df["y_prob"].astype(float).tolist()
-                logits = arr_df["logit"].astype(float).tolist()
-                # ROC / PR / 校准
-                plot_roc_curve(y_true, y_prob, save_path=f"roc_fold_{fold}.png")
-                plot_pr_curve(y_true, y_prob, save_path=f"pr_fold_{fold}.png")
-                plot_calibration_curve(y_true, y_prob, save_path=f"calibration_fold_{fold}.png")
-                # 温度缩放效果（若有最佳T）
-                import json as _json
-                T_json = os.path.join(_metrics_dir_out, f"temperature_{fold_tag}_{_run_id}.json")
-                T_opt = None
-                if os.path.exists(T_json):
-                    with open(T_json, "r", encoding="utf-8") as f:
-                        T_opt = float(_json.load(f).get("best_T"))
-                plot_temperature_scaling_effect(y_true, logits, T_opt, save_path=f"temperature_effect_fold_{fold}.png")
-            # 阈值扫描
-            th_csv = os.path.join(_metrics_dir_out, f"threshold_scan_{fold_tag}_{_run_id}.csv")
-            if os.path.exists(th_csv):
-                import pandas as _pd
-                th_df = _pd.read_csv(th_csv)
-                plot_threshold_scan(th_df["threshold"].tolist(), th_df["f1"].tolist(),
-                                    save_path=f"threshold_scan_fold_{fold}.png")
-            th_cal_csv = os.path.join(_metrics_dir_out, f"threshold_scan_calibrated_{fold_tag}_{_run_id}.csv")
-            if os.path.exists(th_cal_csv):
-                import pandas as _pd
-                th_df2 = _pd.read_csv(th_cal_csv)
-                plot_threshold_scan(th_df2["threshold"].tolist(), th_df2["f1_cal"].tolist(),
-                                    save_path=f"threshold_scan_calibrated_fold_{fold}.png",
-                                    title="F1 vs. 阈值扫描（温度校准后）")
-        except Exception as _e:
-            logger.warning(f"[VIS] fold {fold} test curves plot skipped: {_e}")
+        plot_fold_test_curves(fold, _run_id, _metrics_dir_out)
 
     # 3) 每折性能比较（箱线）
     try:

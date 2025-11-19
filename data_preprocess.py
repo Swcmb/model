@@ -7,7 +7,6 @@ import scipy.sparse as sp     # 稀疏矩阵运算
 from torch.utils.data import Dataset, DataLoader  # 数据集与加载器
 from torch_geometric.data import Data             # 图数据封装（PyTorch Geometric）
 
-from utils import *                         # 通用工具（含 BASE_DIR、图构建、归一化等）
 from utils import em_path as _p             # 统一路径解析（简写）
 from layer import load_positive, load_negative_all, sample_negative, apply_augmentation# 样本构建与特征增强
 from calculating_similarity import calculate_GaussianKernel_sim, getRNA_functional_sim, RNA_fusion_sim, dis_fusion_sim# 相似度计算
@@ -272,27 +271,37 @@ def load_data(args, k_fold=5):
         edge_index_o = torch.tensor(np.vstack((edges_o[0], edges_o[1])), dtype=torch.long)
 
         # 特征构建
+        # 根据参数选择不同的特征构建方式
         if args.feature_type == 'one_hot':
+            # 使用单位矩阵作为特征，每个节点具有唯一的one-hot编码特征
             features = np.eye(adj.shape[0])
         elif args.feature_type == 'uniform':
+            # 使用均匀分布随机生成特征
             rng = np.random.default_rng(int(args.seed))
             features = rng.uniform(low=0, high=1, size=(adj.shape[0], args.dimensions))
         elif args.feature_type == 'normal':
+            # 使用正态分布随机生成特征
             rng = np.random.default_rng(int(args.seed))
             features = rng.normal(loc=0, scale=1, size=(adj.shape[0], args.dimensions))
         elif args.feature_type == 'position':
+            # 使用邻接矩阵的稠密表示作为特征
             features = sp.coo_matrix(adj).todense()
         else:
+            # 默认使用单位矩阵作为特征
             features = np.eye(adj.shape[0])
 
+        # 原始特征视图：对特征进行归一化处理
         features_o = normalize(features)
         if fold == 0:
             args.dimensions = features_o.shape[1]
 
         # 对抗/增强特征视图：固定为 random_permute_features（满足“始终使用该方法生成 features_a”的要求）
         aug_name = "random_permute_features"
+        # 获取噪声标准差参数，默认值为0.01
         noise_std = float(getattr(args, "noise_std", 0.01) or 0.01)
+        # 获取掩码率参数，默认值为0.1
         mask_rate = float(getattr(args, "mask_rate", 0.1) or 0.1)
+        # 获取增强种子，若未设置则基于主种子和折数计算
         base_seed = getattr(args, "augment_seed", None)
         if base_seed is None:
             base_seed = int(getattr(args, "seed", 0)) + fold
