@@ -3,12 +3,13 @@ import json  # 用于保存与加载对抗配置
 import os  # 文件保存路径
 import numpy as np  # 数值计算库
 import torch  # PyTorch 主库
+import torch.nn as nn  # PyTorch 神经网络模块
 from torch_geometric.data import Data  # 图数据结构支持
 from layer import apply_augmentation, adversarial_step_multi  # 增强与对抗步骤
 from log_output_manager import save_result_text, get_run_paths  # 日志与结果管理
 from sklearn.metrics import (roc_auc_score, roc_curve, average_precision_score, 
                            f1_score, auc, precision_score, recall_score, confusion_matrix)  # 评估指标
-# 可视化：按 Epoch 绘制 train_loss / val_loss / val_AUC
+# 可视化：按 Epoch 绘画 train_loss / val_loss / val_AUC
 from visualization import load_epoch_metrics_csv, plot_epoch_curves_from_df
 
 __all__ = ['random', 'json', 'os', 'np', 'torch', 'Data', 'apply_augmentation', 
