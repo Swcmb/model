@@ -1,97 +1,82 @@
+"""
+主程序入口文件
+负责模型训练、验证和测试的全流程控制
+"""
+
 import os
 import sys
-
-# 让以 'python model/main.py' 运行时也能按包导入
 try:
     ROOT = os.path.dirname(os.path.dirname(__file__))
     if ROOT and ROOT not in sys.path:
         sys.path.insert(0, ROOT)
-except Exception:
+except Exception as e:
     pass
-
 import torch
 import numpy as np
-
-# 参数与超参数设置
 from parms_setting import settings
-# 随机性统一设置
 from utils import set_global_seed
-# 数据加载与折叠划分
 from data_preprocess import load_data, get_fold_data
-# 模型实例化
 from instantiation import Create_model
-# 训练流程
 from train import train_model
-# 日志管理
 from log_output_manager import *
 
-# 可视化
+# 可视化模块导入
 from visualization import (
-    load_epoch_metrics_csv,
-    plot_multi_loss_breakdown,
-    plot_epoch_metrics_bar,
-    plot_train_vs_val_loss,
-    plot_epoch_curves_from_df,
-    plot_roc_curve,
-    plot_pr_curve,
-    plot_calibration_curve,
-    plot_temperature_scaling_effect,
-    plot_threshold_scan,
-    plot_per_fold_comparison,
-    plot_confusion_matrix_heatmap
+    load_epoch_metrics_csv,plot_multi_loss_breakdown,plot_epoch_metrics_bar,plot_train_vs_val_loss,
+    plot_epoch_curves_from_df,plot_roc_curve,plot_pr_curve,plot_calibration_curve,plot_temperature_scaling_effect,
+    plot_threshold_scan,plot_per_fold_comparison,plot_confusion_matrix_heatmap
 )
 
 
-# 参数改由 EM/parms_setting.py 统一解析（包含 --run_name 与 --shutdown）
-
-# 性能优化相关函数已迁移至 autodl.py
-
+#=== 参数解析与默认值设置 ===
+"""
+解析命令行参数并设置默认值
+包括早停策略的相关参数设置
+"""
 args = settings()
-# 如果args中没有early_stop_patience属性，则设置默认值为3
 if not hasattr(args, "early_stop_patience"):
     args.early_stop_patience = 3
-# 如果args中没有early_stop_min_delta属性，则设置默认值为0.0
 if not hasattr(args, "early_stop_min_delta"):
     args.early_stop_min_delta = 0.0
-# 如果args中没有early_stop_metric属性，则设置默认值为"auprc"
 if not hasattr(args, "early_stop_metric"):
     args.early_stop_metric = "auprc"
 
-# 获取CUDA可见设备设置，默认为"0"
-cuda_visible_devices = getattr(args, "cuda_visible_devices", "0")
-# 设置环境变量CUDA_VISIBLE_DEVICES
-os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
-
-# 初始化日志记录器
+#=== 日志系统初始化 ===
+"""
+初始化日志系统和结果目录
+重定向print函数到日志系统
+"""
 logger = init_logging(run_name=args.run_name)
-# 重定向print函数输出到日志
 redirect_print(True)
-# 创建结果运行目录
 make_result_run_dir("data")
 logger.info("Initialized logging and result directory.")
 
 def _print_to_logger(*args, **kwargs):
     """
-    将print函数的输出重定向到日志记录器
+    将print输出重定向到日志系统的辅助函数
     
     Args:
-        *args: 任意数量的位置参数，要打印的消息
-        **kwargs: 任意数量的关键字参数
+        *args: 要打印的内容
+        **kwargs: 其他参数
     """
     try:
         msg = " ".join(str(x) for x in args)
     except Exception:
         msg = " ".join(map(str, args))
     logger.info(msg)
-# 重写内置print函数，使其输出到日志记录器
 print = _print_to_logger
 
-
-# 检查CUDA是否可用，并设置args.cuda属性
+#=== GPU设备配置 ===
+"""
+配置GPU设备环境变量和检测可用性
+记录CUDA相关信息到日志
+"""
+cuda_visible_devices = getattr(args, "cuda_visible_devices", "0")
+os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
+logger.info(f"CUDA_VISIBLE_DEVICES set to: {cuda_visible_devices}")
 args.cuda = torch.cuda.is_available()
 if args.cuda:
-    # CUDA可用时记录相关信息
     logger.info("Using CUDA: True")
     logger.info(f"CUDA device count: {torch.cuda.device_count()}")
     logger.info(f"Current CUDA device: {torch.cuda.current_device()}")
@@ -100,12 +85,19 @@ if args.cuda:
     except Exception:
         logger.info("Could not get CUDA device name")
 else:
-    # CUDA不可用时记录相关信息
     logger.info("Using CUDA: False - CUDA is not available")
-# 设置全局随机种子
+
+#=== 可重复性设置 ===
+"""
+设置全局随机种子以确保实验可重复性
+"""
 set_global_seed(int(getattr(args, "seed", 0)))
 
-# 打印增强配置汇总
+#=== 数据增强配置记录 ===
+"""
+记录数据增强相关的配置参数
+包括增强方式、噪声标准差、掩码率等
+"""
 try:
     aug = getattr(args, "augment", "random_permute_features")
     mode = getattr(args, "augment_mode", "static") if hasattr(args, "augment_mode") else "static"
@@ -133,16 +125,18 @@ except Exception as e:
     logger.info(f"[AUGMENT] config print skipped due to: {e}")
 
 
+# 加载所有折的数据
 data_o_folds, data_a_folds, train_loaders, test_loaders = load_data(args)
 
 # 存储每一折的结果
 all_fold_results = []
 logger.info("Starting 5-fold cross validation...")
 
+# 执行5折交叉验证
 for fold in range(5):
     # 按折使用对应的图数据与加载器
     data_o = data_o_folds[fold]
-    data_a = data_a_folds[fold]
+    data_a = data_a_folds[fold] 
     logger.info(f"=== Fold {fold + 1}/5 ===")
     
     # 为每一折创建新的模型和优化器

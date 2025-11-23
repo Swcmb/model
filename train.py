@@ -39,7 +39,7 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
     m = torch.nn.Sigmoid()  # 实例化Sigmoid函数，用于将模型输出转换为概率
     loss_fct = torch.nn.BCELoss()  # 实例化二元交叉熵损失函数（用于主任务）
     b_xent = nn.BCEWithLogitsLoss()  # 实例化带Logits的二元交叉熵损失，更稳定（用于对比和对抗损失）
-    ce_loss = nn.CrossEntropyLoss()  # 用于 MoCo InfoNCE
+    ce_loss = nn.CrossEntropyLoss()  # 用于 MoCo InfoNCE 损失
     node_loss = nn.BCEWithLogitsLoss()  # 同上，用于节点级别的对抗损失
     loss_history = []  # 创建一个列表来记录每个批次的损失值
 
@@ -175,6 +175,16 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
                 _X_list = [data_o.x] + ([data_a_aug.x] if use_moco_adv else [])
 
                 def _adv_loss_fn(perturbed_list):
+                    """
+                    对抗训练中计算扰动后数据损失的函数
+                    
+                    Args:
+                        perturbed_list (list): 包含扰动后的图节点特征列表，
+                                              顺序与_X_list对应，通常包含原始图和增强图的特征
+                        
+                    Returns:
+                        torch.Tensor: 加权后的总损失值，包括主要任务损失、对比损失和节点损失
+                    """
                     # perturbed_list 对应 _X_list 的顺序
                     xo = perturbed_list[0]
                     xa = perturbed_list[1] if (use_moco_adv and len(perturbed_list) > 1) else data_a_aug.x
@@ -198,12 +208,14 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
                 # 在调用对抗生成前，统一使用 derive_adv_seed 派生种子
                 from utils import derive_adv_seed
                 seed_batch = derive_adv_seed(args, fold_idx or 0, epoch, i)
+                # 设置PyTorch随机种子，确保实验可重现性
                 try:
                     torch.manual_seed(seed_batch)
                     if torch.cuda.is_available():
                         torch.cuda.manual_seed_all(seed_batch)
                 except Exception:
                     pass
+                # 设置NumPy和Python内置random模块的随机种子
                 try:
                     np.random.seed(seed_batch)
                     random.seed(seed_batch)
@@ -745,7 +757,7 @@ def test(model, loader, data_o, data_a, args):
 3. **GPU 优化**：
    - 显式调用 `torch.cuda.empty_cache()` 释放显存，避免内存泄漏。
 4. **鲁棒性增强**：
-   - 对抗训练和在线增强提升模型对输入扰动的鲁棒性。
+   - 对抗训练和动态增强提升模型对输入扰动的鲁棒性。
 
 ---
 

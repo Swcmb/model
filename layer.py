@@ -483,7 +483,7 @@ class EM(nn.Module):
 
     def forward(self, data_o, data_a, idx):
         """
-        前向传播函数
+        前向传播函数(预测计算)
         
         Args:
             data_o: 原始图数据批次
@@ -555,7 +555,7 @@ class EM(nn.Module):
         return log, cla_os, cla_os_a, x2_o, logits_adv, log1
 
 # =================================================
-# 数据标注/三元组构建（原 label_annotation.py）
+# 数据标注/三元组构建
 # =================================================
 def load_positive(in_file: str, seed: int):
     """
@@ -791,6 +791,18 @@ def adversarial_step_multi(
     if mode == "none":
         return X_list  # 未开启对抗
 
+    # 对抗攻击参数配置
+    # norm: 对抗攻击的范数类型，默认为 "linf" (L∞范数)
+    # eps: 对抗扰动的最大幅度限制，默认为 0.01
+    # alpha: 对抗攻击的步长，默认为 0.005
+    # steps: 对抗攻击的迭代步数，默认为 0
+    # rand_init: 是否随机初始化扰动，默认为 False
+    # project: 是否将扰动投影到约束球内，默认为 True
+    # agg: 梯度聚合方式，默认为 "mean"
+    # budget: 对抗预算分配方式，默认为 "shared"
+    # use_amp: 是否使用自动混合精度训练，默认为 False
+    # cmin: 对抗样本特征值下界，默认为负无穷
+    # cmax: 对抗样本特征值上界，默认为正无穷
     norm = getattr(cfg, "adv_norm", "linf")
     eps = float(getattr(cfg, "adv_eps", 0.01) or 0.0)
     alpha = float(getattr(cfg, "adv_alpha", 0.005) or 0.0)
