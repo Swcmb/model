@@ -7,7 +7,7 @@ import scipy.sparse as sp     # 稀疏矩阵运算
 from torch.utils.data import Dataset, DataLoader  # 数据集与加载器
 from torch_geometric.data import Data             # 图数据封装（PyTorch Geometric）
 
-from utils import em_path as _p             # 统一路径解析（简写）
+from utils import em_path as _p, construct_graph, lalacians_norm, normalize             # 统一路径解析（简写）
 from layer import load_positive, load_negative_all, sample_negative, apply_augmentation# 样本构建与特征增强
 from calculating_similarity import calculate_GaussianKernel_sim, getRNA_functional_sim, RNA_fusion_sim, dis_fusion_sim# 相似度计算
 from log_output_manager import get_logger, save_cv_datasets, save_fold_stats_json# 日志与数据保存
@@ -146,7 +146,7 @@ def load_data(args, k_fold=5):
 
     # （可选）保存折数据，由 log_output_manager 统一实现
     if getattr(args, 'save_datasets', True):
-        save_cv_datasets(args, total_data, train_data_folds, test_data_folds, BASE_DIR)
+        save_cv_datasets(args, total_data, train_data_folds, test_data_folds, _p(""))
 
     _logger.info('Selected task type...')
 
@@ -413,7 +413,7 @@ def load_data(args, k_fold=5):
         test_loaders.append(DataLoader(test_set, **base_params))
 
     # 写出折级统计（OUTPUT/result/metrics）
-    save_fold_stats_json(fold_stats, BASE_DIR)
+    save_fold_stats_json(fold_stats, _p(""))
 
     _logger.info('Loading finished!')
     return data_o_folds, data_a_folds, train_loaders, test_loaders
