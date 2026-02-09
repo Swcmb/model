@@ -6,7 +6,7 @@ import scipy.sparse as sp  # 稀疏矩阵操作
 import torch  # PyTorch
 import torch.nn as nn  # 神经网络模块
 from torch import Tensor  # 类型注解
-from typing import Any, Optional, Tuple  # 类型注解
+from typing import Any, Optional, Tuple, List  # 类型注解
 import math  # 数学运算
 BASE_DIR = os.path.dirname(__file__)
 
@@ -654,3 +654,101 @@ def _rng(seed: Optional[int]) -> np.random.Generator:
     """
     """创建独立的 NumPy 随机数发生器（可选固定种子）"""
     return np.random.default_rng(seed) if seed is not None else np.random.default_rng()
+
+
+# ========= BYOL 损失函数相关 =========
+class BYOLLoss(nn.Module):
+    """
+    BYOL (Bootstrap Your Own Latent) 多视图对称损失函数
+    基于 Bootstrap Your Own Latent: A New Approach to Self-Supervised Learning 论文实现
+    """
+    
+    def __init__(self, temperature: float = 0.2):
+        """
+        初始化BYOL损失函数
+        
+        Args:
+            temperature: 温度系数，用于调整对比学习的强度
+        """
+        super().__init__()
+        self.temperature = temperature
+        self.cosine_similarity = nn.CosineSimilarity(dim=-1)
+    
+    def forward(self, online_view1: torch.Tensor, online_view2: torch.Tensor,
+                target_view1: torch.Tensor, target_view2: torch.Tensor) -> torch.Tensor:
+        """
+        计算BYOL对称损失
+        
+        Args:
+            online_view1: 在线网络第一个视图的输出
+            online_view2: 在线网络第二个视图的输出
+            target_view1: 目标网络第一个视图的输出
+            target_view2: 目标网络第二个视图的输出
+            
+        Returns:
+            torch.Tensor: 对称BYOL损失值
+        """
+        # 确保所有输入张量形状一致
+        assert online_view1.shape == online_view2.shape == target_view1.shape == target_view2.shape
+        
+        # 计算对称损失：L = 2 - 2 * (q1·z2 + q2·z1) / (||q1||·||z2|| + ||q2||·||z1||)
+        
+        # 视图1到视图2的损失
+        loss_1_to_2 = 2 - 2 * self.cosine_similarity(online_view1, target_view2.detach()).mean()
+        
+        # 视图2到视图1的损失
+        loss_2_to_1 = 2 - 2 * self.cosine_similarity(online_view2, target_view1.detach()).mean()
+        
+        # 对称损失的平均值
+        symmetric_loss = (loss_1_to_2 + loss_2_to_1) / 2
+        
+        return symmetric_loss
+
+
+def compute_byol_loss(predictions: List[torch.Tensor], targets: List[torch.Tensor], 
+                     temperature: float = 0.2) -> torch.Tensor:
+    """
+    计算多视图BYOL损失（支持多个视图对）
+    
+    Args:
+        predictions: 在线网络的预测输出列表
+        targets: 目标网络的输出列表
+        temperature: 温度系数
+        
+    Returns:
+        torch.Tensor: 多视图BYOL损失的平均值
+    """
+    assert len(predictions) == len(targets), "预测和目标视图数量必须相同"
+    
+    byol_loss = BYOLLoss(temperature=temperature)
+    
+    # 计算所有视图对之间的损失
+    losses = []
+    num_views = len(predictions)
+    
+    for i in range(num_views):
+        for j in range(num_views):
+            if i != j:  # 避免相同视图的比较
+                loss = byol_loss(predictions[i], predictions[j], 
+                               targets[i].detach(), targets[j].detach())
+                losses.append(loss)
+    
+    # 计算所有视图对损失的平均值
+    if losses:
+        return torch.stack(losses).mean()
+    else:
+        return torch.tensor(0.0, device=predictions[0].device)
+
+
+def normalize_byol_features(features: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    对BYOL特征进行L2归一化
+    
+    Args:
+        features: 输入特征张量
+        eps: 数值稳定性常数
+        
+    Returns:
+        torch.Tensor: L2归一化后的特征
+    """
+    return features / (features.norm(dim=1, keepdim=True) + eps)

@@ -26,7 +26,9 @@ EM/
 ├── utils.py                  # 工具函数
 ├── visualization.py          # 可视化工具
 ├── log_output_manager.py     # 日志和输出管理
-├── gt_fusion_test.py         # 图变换器融合测试
+├── FUSION_STRATEGY_USAGE.md  # 融合策略使用说明
+├── TRI_ENTITY_FUSION_USAGE.md# 三实体融合使用说明
+├── README_visualization.md   # 可视化说明
 └── README.md                 # 本文件
 ```
 
@@ -107,6 +109,45 @@ python main.py --cuda_visible_devices 0
 
 更多参数请查看 `parms_setting.py` 文件。
 
+## 高级功能
+
+### 融合策略
+
+项目支持多种实体融合策略，包括：
+
+1. **自注意力融合** (`self_attention`) - 默认策略，使用多头自注意力机制
+2. **协作注意力融合** (`co_attention`) - 使用双向注意力机制让两个实体相互关注
+3. **混合融合** (`hybrid`) - 结合上述两种策略，通过权重平衡
+
+使用示例：
+```bash
+# 使用协作注意力融合
+python main.py --fusion_strategy co_attention
+
+# 使用混合融合，自注意力权重为0.7
+python main.py --fusion_strategy hybrid --fusion_weight 0.7
+```
+
+详细说明请查看 [FUSION_STRATEGY_USAGE.md](FUSION_STRATEGY_USAGE.md)
+
+### 三实体融合模式
+
+除了传统的两实体关联预测，项目还支持三实体融合模式，可以同时考虑三个实体之间的复杂关系：
+
+1. **三实体自注意力融合** (`tri_self_attention`) - 默认三实体策略
+2. **三实体协作注意力融合** (`tri_co_attention`) - 使用循环注意力机制
+
+使用示例：
+```bash
+# 启用三实体模式，使用默认策略
+python main.py --tri_entity_mode True
+
+# 启用三实体模式，使用协作注意力策略
+python main.py --tri_entity_mode True --tri_fusion_strategy tri_co_attention
+```
+
+详细说明请查看 [TRI_ENTITY_FUSION_USAGE.md](TRI_ENTITY_FUSION_USAGE.md)
+
 ## 项目特点
 
 ### 1. 多任务学习框架
@@ -116,7 +157,7 @@ python main.py --cuda_visible_devices 0
 
 ### 2. 图神经网络架构
 - 编码器：GAT + Graph Transformer
-- 融合模块：基于注意力机制的双实体融合
+- 融合模块：基于注意力机制的双实体/三实体融合
 - 解码器：多层感知机
 
 ### 3. 数据增强策略
@@ -152,7 +193,7 @@ python main.py --cuda_visible_devices 0
 
 ## 可视化说明
 
-项目提供了丰富的可视化功能，请参考 `README_visualization.md` 文件了解详细信息。
+项目提供了丰富的可视化功能，请参考 [README_visualization.md](README_visualization.md) 文件了解详细信息。
 
 ## 引用
 

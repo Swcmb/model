@@ -6,10 +6,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import roc_curve, roc_auc_score, precision_recall_curve, average_precision_score, confusion_matrix
 from sklearn.calibration import calibration_curve
-from font_config import setup_chinese_font
-
-setup_chinese_font()  # 自动设置中文字体
-
 
 # 定义公共接口
 __all__ = [
@@ -50,7 +46,7 @@ def _set_chinese_font():
     # 中文字体与负号设置
     try:
         # 在 Windows 11 常见可用字体
-        plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'SimSun', 'Arial Unicode MS']
+        plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'SimSun', 'Arial Unicode MS','DejaVu Sans Mono']
         plt.rcParams['axes.unicode_minus'] = False
         # 让 seaborn 也使用中文主字体
         try:
@@ -135,25 +131,26 @@ def _finalize(fig: plt.Figure, save_path: Optional[str] = None, dpi: int = 300) 
         plt.show()
 
 
-# 1) 损失曲线：支持总损失和分项损失
+# 1) losscurve：支持总loss和分项loss
 def plot_loss_curve(
     loss_history: Sequence[float],
     sub_losses: Optional[Dict[str, Sequence[float]]] = None,
     save_path: Optional[str] = None,
-    title: str = "训练损失曲线（批次级）"
+    title: str = "Training Loss Curve (Batch Level)"
 ) -> None:
     """
-    绘制训练损失曲线图，支持绘制总损失和各项子损失
-    
+    Plot training loss curve, supporting total loss and sub-item losses
+
     Args:
-        loss_history (Sequence[float]): 批次级别的总损失序列，长度为批次数量
-        sub_losses (Optional[Dict[str, Sequence[float]]]): 可选的子损失字典，键为损失名称，值为对应的损失序列
-                                                         如 {'task_loss': [...], 'cont_loss': [...], 'adv_loss': [...]}
-        save_path (Optional[str]): 图片保存路径，如果为None则不保存
-        title (str): 图表标题，默认为"训练损失曲线（批次级）"
-    
+        loss_history (Sequence[float]): Batch-level total loss sequence
+        sub_losses (Optional[Dict[str, Sequence[float]]]): Optional sub-loss dictionary, keys are loss names,
+                                                         values are corresponding loss sequences
+                                                         e.g. {'task_loss': [...], 'cont_loss': [...], 'adv_loss': [...]}
+        save_path (Optional[str]): Image save path, if None then display
+        title (str): Chart title, default "Training Loss Curve (Batch Level)"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     fig, ax = plt.subplots(figsize=(10, 5))
     x = np.arange(1, len(loss_history) + 1)
@@ -163,13 +160,13 @@ def plot_loss_curve(
             if v is not None and len(v) == len(loss_history):
                 ax.plot(x, v, label=k, linewidth=1.5)
     ax.set_title(title)
-    ax.set_xlabel("训练批次")
-    ax.set_ylabel("损失")
+    ax.set_xlabel("Training Batch")
+    ax.set_ylabel("Loss")
     ax.legend()
     _finalize(fig, save_path)
 
 
-# 2) 多损失分解：按epoch绘制多条线或堆叠面积
+# 2) 多loss分解：按epoch绘制多条线或堆叠面积
 def plot_multi_loss_breakdown(
     epochs: Sequence[int],
     task_loss: Sequence[float],
@@ -177,22 +174,22 @@ def plot_multi_loss_breakdown(
     adv_loss: Sequence[float],
     stacked: bool = False,
     save_path: Optional[str] = None,
-    title: str = "多损失分解（按Epoch）"
+    title: str = "Multiple Loss Decomposition (by Epoch)"
 ) -> None:
     """
-    绘制多种损失随epoch变化的分解图，支持折线图和堆叠面积图两种形式
-    
+    Plot multiple loss decomposition by epoch, supporting line chart and stacked area chart
+
     Args:
-        epochs (Sequence[int]): epoch序列，表示横轴
-        task_loss (Sequence[float]): 任务损失序列
-        cont_loss (Sequence[float]): 对比损失序列
-        adv_loss (Sequence[float]): 对抗损失序列
-        stacked (bool): 是否使用堆叠面积图，默认为False即使用折线图
-        save_path (Optional[str]): 图片保存路径，如果为None则不保存
-        title (str): 图表标题，默认为"多损失分解（按Epoch）"
-    
+        epochs (Sequence[int]): Epoch sequence for x-axis
+        task_loss (Sequence[float]): Task loss sequence
+        cont_loss (Sequence[float]): Contrast loss sequence
+        adv_loss (Sequence[float]): Adversarial loss sequence
+        stacked (bool): Whether to use stacked area chart, default False (use line chart)
+        save_path (Optional[str]): Image save path, if None then display
+        title (str): Chart title, default "Multiple Loss Decomposition (by Epoch)"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     fig, ax = plt.subplots(figsize=(10, 5))
     x = np.asarray(epochs)
@@ -204,29 +201,29 @@ def plot_multi_loss_breakdown(
         ax.plot(x, adv_loss, label="adv_loss", linewidth=2)
     ax.set_title(title)
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("损失")
+    ax.set_ylabel("Loss")
     ax.legend(loc="best")
     _finalize(fig, save_path)
 
 
-# 3) 训练 vs 验证损失
+# 3) 训练 vs 验证loss
 def plot_train_vs_val_loss(
     train_losses: Sequence[float],
     val_losses: Sequence[float],
     save_path: Optional[str] = None,
-    title: str = "训练 vs 验证损失（过拟合检查）"
+    title: str = "Training vs Validation Loss (Overfitting Check)"
 ) -> None:
     """
-    绘制训练损失与验证损失对比图，用于检查模型是否过拟合
-    
+    Plot training loss vs validation loss for overfitting check
+
     Args:
-        train_losses (Sequence[float]): 训练损失序列
-        val_losses (Sequence[float]): 验证损失序列
-        save_path (Optional[str]): 图片保存路径，如果为None则不保存
-        title (str): 图表标题，默认为"训练 vs 验证损失（过拟合检查）"
-    
+        train_losses (Sequence[float]): Training loss sequence
+        val_losses (Sequence[float]): Validation loss sequence
+        save_path (Optional[str]): Image save path, if None then display
+        title (str): Chart title, default "Training vs Validation Loss (Overfitting Check)"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     fig, ax = plt.subplots(figsize=(10, 5))
     x_train = np.arange(1, len(train_losses) + 1)
@@ -235,7 +232,7 @@ def plot_train_vs_val_loss(
     ax.plot(x_val, val_losses, label="val_loss", color="#d62728", linewidth=2)
     ax.set_title(title)
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("损失")
+    ax.set_ylabel("Loss")
     ax.legend()
     _finalize(fig, save_path)
 
@@ -282,39 +279,39 @@ def plot_epoch_curves(
     val_aurocs: Optional[Sequence[float]] = None,
     epochs: Optional[Sequence[int]] = None,
     save_path: Optional[str] = None,
-    title: str = "按Epoch的训练/验证损失与验证AUROC曲线",
+    title: str = "Training/Validation Loss and Validation AUROC Curve by Epoch",
     smooth: Optional[str] = None,
     smooth_alpha: float = 0.2,
     smooth_window: int = 3,
 ) -> None:
     """
-    绘制每个epoch的训练损失、验证损失以及可选的验证AUROC曲线
-    
+    Plot training loss, validation loss, and optional validation AUROC curve for each epoch
+
     Args:
-        train_losses (Sequence[float]): 每个epoch的训练损失序列
-        val_losses (Sequence[float]): 每个epoch的验证损失序列
-        val_aurocs (Optional[Sequence[float]]): 每个epoch的验证AUROC值序列，可选参数
-        epochs (Optional[Sequence[int]]): epoch索引序列，如果不提供则默认为1到N
-        save_path (Optional[str]): 图片保存路径，如果为None则不保存
-        title (str): 图表标题，默认为"按Epoch的训练/验证损失与验证AUROC曲线"
-        smooth (Optional[str]): 平滑方法，可选 None、"ema"、"moving"
-        smooth_alpha (float): EMA平滑系数，默认为0.2
-        smooth_window (int): 滑动平均窗口大小，默认为3
-    
+        train_losses (Sequence[float]): Training loss sequence for each epoch
+        val_losses (Sequence[float]): Validation loss sequence for each epoch
+        val_aurocs (Optional[Sequence[float]]): Validation AUROC value sequence for each epoch, optional
+        epochs (Optional[Sequence[int]]): Epoch index sequence, default 1 to N if not provided
+        save_path (Optional[str]): Image save path, if None then display
+        title (str): Chart title, default "Training/Validation Loss and Validation AUROC Curve by Epoch"
+        smooth (Optional[str]): Smoothing method, optional None, "ema", "moving"
+        smooth_alpha (float): EMA smoothing coefficient, default 0.2
+        smooth_window (int): Moving average window size, default 3
+
     Returns:
-        None: 直接显示或保存图表，无返回值
-        
+        None: Display or save chart directly, no return value
+
     Raises:
-        ValueError: 当训练损失与验证损失为空或长度不一致时抛出异常
-        ValueError: 当epochs长度与损失序列长度不一致时抛出异常
-        ValueError: 当val_aurocs长度与损失序列长度不一致时抛出异常
+        ValueError: When training loss and validation loss are empty or have inconsistent lengths
+        ValueError: When epochs length is inconsistent with loss sequence length
+        ValueError: When val_aurocs length is inconsistent with loss sequence length
     """
     tl = np.asarray(train_losses, dtype=np.float64)
     vl = np.asarray(val_losses, dtype=np.float64)
     if len(tl) == 0 or len(vl) == 0:
-        raise ValueError("train_losses 与 val_losses 不能为空。")
+        raise ValueError("train_losses and val_losses cannot be empty.")
     if len(tl) != len(vl):
-        raise ValueError("train_losses 与 val_losses 长度必须一致。")
+        raise ValueError("train_losses and val_losses must have the same length.")
 
     n = len(tl)
     if epochs is None:
@@ -322,36 +319,36 @@ def plot_epoch_curves(
     else:
         x = np.asarray(epochs, dtype=np.int64)
         if len(x) != n:
-            raise ValueError("epochs 长度需与损失序列一致。")
+            raise ValueError("epochs length must match loss sequence length.")
 
-    # 平滑（默认关闭）
+    # Smoothing (disabled by default)
     tl_s = _apply_smooth(tl, method=smooth, alpha=smooth_alpha, window=smooth_window)
     vl_s = _apply_smooth(vl, method=smooth, alpha=smooth_alpha, window=smooth_window)
 
     fig, ax1 = plt.subplots(figsize=(11, 5))
-    # 左轴：损失
+    # Left axis: loss
     l1, = ax1.plot(x, tl_s, label="train_loss", color="#1f77b4", linewidth=2, marker="o", markersize=3)
     l2, = ax1.plot(x, vl_s, label="val_loss", color="#d62728", linewidth=2, marker="s", markersize=3)
     lines = [l1, l2]
-    labels = ["训练损失", "验证损失"]
+    labels = ["training loss", "validation loss"]
     ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("损失")
+    ax1.set_ylabel("Loss")
     ax1.set_title(title)
 
-    # 右轴：AUROC（若提供）
+    # Right axis: AUROC (if provided)
     if val_aurocs is not None:
         va = np.asarray(val_aurocs, dtype=np.float64)
         if len(va) != n:
-            raise ValueError("val_aurocs 长度需与损失序列一致。")
+            raise ValueError("val_aurocs length must match loss sequence length.")
         va_s = _apply_smooth(va, method=smooth, alpha=smooth_alpha, window=smooth_window)
         ax2 = ax1.twinx()
         l3, = ax2.plot(x, va_s, label="val_AUROC", color="#2ca02c", linewidth=2, marker="o", markersize=4)
         ax2.set_ylabel("AUROC")
         ax2.set_ylim(-0.02, 1.02)
         lines.append(l3)
-        labels.append("验证AUROC")
+        labels.append("validation AUROC")
 
-    # 合并图例到左上角
+    # Merge legend to top-left corner
     ax1.legend(lines, labels, loc="best")
     _finalize(fig, save_path)
 
@@ -360,52 +357,52 @@ def plot_epoch_curves_from_df(
     df: Union[pd.DataFrame, List[Dict]],
     cols: Dict[str, str] = {"epoch": "epoch", "train": "loss_train", "val": "val_loss", "auroc": "val_auroc"},
     save_path: Optional[str] = None,
-    title: str = "按Epoch的训练/验证损失与验证AUROC曲线",
+    title: str = "Training/Validation Loss and Validation AUROC Curve by Epoch",
     smooth: Optional[str] = None,
     smooth_alpha: float = 0.2,
     smooth_window: int = 3,
 ) -> None:
     """
-    从DataFrame数据中绘制每个epoch的训练损失、验证损失以及可选的验证AUROC曲线
-    
+    Plot training loss, validation loss, and optional validation AUROC curve from DataFrame data for each epoch
+
     Args:
-        df (Union[pd.DataFrame, List[Dict]]): 包含训练过程数据的DataFrame或字典列表
-        cols (Dict[str, str]): 列名映射字典，指定各数据列在DataFrame中的实际列名，
-                              默认值为 {"epoch": "epoch", "train": "loss_train", "val": "val_loss", "auroc": "val_auroc"}
-        save_path (Optional[str]): 图片保存路径，如果为None则不保存
-        title (str): 图表标题，默认为"按Epoch的训练/验证损失与验证AUROC曲线"
-        smooth (Optional[str]): 平滑方法，可选 None、"ema"、"moving"
-        smooth_alpha (float): EMA平滑系数，默认为0.2
-        smooth_window (int): 滑动平均窗口大小，默认为3
-    
+        df (Union[pd.DataFrame, List[Dict]]): DataFrame or dictionary list containing training process data
+        cols (Dict[str, str]): Column name mapping dictionary, specifying actual column names in DataFrame,
+                              default {"epoch": "epoch", "train": "loss_train", "val": "val_loss", "auroc": "val_auroc"}
+        save_path (Optional[str]): Image save path, if None then display
+        title (str): Chart title, default "Training/Validation Loss and Validation AUROC Curve by Epoch"
+        smooth (Optional[str]): Smoothing method, optional None, "ema", "moving"
+        smooth_alpha (float): EMA smoothing coefficient, default 0.2
+        smooth_window (int): Moving average window size, default 3
+
     Returns:
-        None: 直接显示或保存图表，无返回值
-        
+        None: Display or save chart directly, no return value
+
     Raises:
-        ValueError: 当DataFrame缺少必要的列时抛出异常
+        ValueError: When DataFrame is missing required columns
     """
     if not isinstance(df, pd.DataFrame):
         df = pd.DataFrame(df)
 
-    # 读取 epoch
+    # Read epoch
     epoch_col = cols.get("epoch", "epoch")
     if epoch_col not in df.columns:
-        raise ValueError(f"DataFrame 缺少列：{epoch_col}")
+        raise ValueError(f"DataFrame missing column: {epoch_col}")
     epochs = df[epoch_col].to_numpy()
 
-    # 读取训练损失
+    # Read training loss
     train_col = cols.get("train", "loss_train")
     if train_col not in df.columns:
-        raise ValueError(f"DataFrame 缺少训练损失列：{train_col}")
+        raise ValueError(f"DataFrame missing training loss column: {train_col}")
     train_losses = df[train_col].to_numpy()
 
-    # 读取验证损失（必需）
+    # Read validation loss (required)
     val_col = cols.get("val", "val_loss")
     if val_col not in df.columns:
-        raise ValueError(f"DataFrame 缺少必需列：{val_col}")
+        raise ValueError(f"DataFrame missing required column: {val_col}")
     val_losses = df[val_col].to_numpy()
 
-    # 读取 AUROC（可缺省）
+    # Read AUROC (optional)
     auroc_col = cols.get("auroc", "val_auroc")
     val_aurocs = None
     if auroc_col and (auroc_col in df.columns):
@@ -428,25 +425,25 @@ def plot_epoch_curves_from_df(
 def plot_lr_schedule(
     lrs: Sequence[float],
     save_path: Optional[str] = None,
-    title: str = "学习率调度曲线"
+    title: str = "Learning Rate Schedule Curve"
 ) -> None:
     """
-    绘制学习率调度曲线图
-    
+    Plot learning rate schedule curve
+
     Args:
-        lrs (Sequence[float]): 每个epoch的学习率序列
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (str): 图表标题，默认为"学习率调度曲线"
-    
+        lrs (Sequence[float]): Learning rate sequence for each epoch
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (str): Chart title, default "Learning Rate Schedule Curve"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     fig, ax = plt.subplots(figsize=(10, 4))
     x = np.arange(1, len(lrs) + 1)
     ax.plot(x, lrs, color="#9467bd", linewidth=2)
     ax.set_title(title)
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("学习率")
+    ax.set_ylabel("Learning Rate")
     _finalize(fig, save_path)
 
 
@@ -455,19 +452,19 @@ def plot_epoch_metrics_bar(
     epoch_metrics: Union[pd.DataFrame, List[Dict]],
     metrics: List[str] = ["auroc", "auprc", "f1"],
     save_path: Optional[str] = None,
-    title: str = "Epoch 指标汇总（柱状）"
+    title: str = "Epoch Metric Summary (Bar Chart)"
 ) -> None:
     """
-    绘制每个epoch的指标柱状图
-    
+    Plot metric bar chart for each epoch
+
     Args:
-        epoch_metrics (Union[pd.DataFrame, List[Dict]]): 包含每个epoch指标的数据，可以是DataFrame或字典列表
-        metrics (List[str]): 需要绘制的指标列表，默认为["auroc", "auprc", "f1"]
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (str): 图表标题，默认为"Epoch 指标汇总（柱状）"
-    
+        epoch_metrics (Union[pd.DataFrame, List[Dict]]): Data containing metrics for each epoch, can be DataFrame or dictionary list
+        metrics (List[str]): List of metrics to plot, default ["auroc", "auprc", "f1"]
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (str): Chart title, default "Epoch Metric Summary (Bar Chart)"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     if not isinstance(epoch_metrics, pd.DataFrame):
         epoch_metrics = pd.DataFrame(epoch_metrics)
@@ -476,12 +473,12 @@ def plot_epoch_metrics_bar(
     sns.barplot(data=df, x="epoch", y="value", hue="metric", ax=ax)
     ax.set_title(title)
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("指标值")
+    ax.set_ylabel("Metric Value")
     ax.legend(loc="best")
     _finalize(fig, save_path)
 
 
-# 6) ROC 曲线
+# 6) ROC curve
 def plot_roc_curve(
     y_true: Sequence[int],
     y_score: Sequence[float],
@@ -489,30 +486,30 @@ def plot_roc_curve(
     title: Optional[str] = None
 ) -> None:
     """
-    绘制ROC曲线
-    
+    Plot ROC curve
+
     Args:
-        y_true (Sequence[int]): 真实标签序列
-        y_score (Sequence[float]): 预测得分序列
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (Optional[str]): 图表标题，如果为None则使用默认标题"ROC 曲线"
-    
+        y_true (Sequence[int]): True label sequence
+        y_score (Sequence[float]): Predicted score sequence
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (Optional[str]): Chart title, default "ROC Curve" if None
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     fpr, tpr, _ = roc_curve(y_true, y_score)
     auc = roc_auc_score(y_true, y_score)
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.plot(fpr, tpr, label=f"ROC (AUROC={auc:.4f})", color="#1f77b4", linewidth=2)
     ax.plot([0, 1], [0, 1], "k--", alpha=0.5)
-    ax.set_title(title or "ROC 曲线")
+    ax.set_title(title or "ROC Curve")
     ax.set_xlabel("False Positive Rate")
     ax.set_ylabel("True Positive Rate")
     ax.legend(loc="lower right")
     _finalize(fig, save_path)
 
 
-# 7) PR 曲线
+# 7) PR curve
 def plot_pr_curve(
     y_true: Sequence[int],
     y_score: Sequence[float],
@@ -520,56 +517,56 @@ def plot_pr_curve(
     title: Optional[str] = None
 ) -> None:
     """
-    绘制精确率-召回率曲线（PR曲线）
-    
+    Plot Precision-Recall curve
+
     Args:
-        y_true (Sequence[int]): 真实标签序列
-        y_score (Sequence[float]): 预测得分序列
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (Optional[str]): 图表标题，如果为None则使用默认标题"Precison-Recall 曲线"
-    
+        y_true (Sequence[int]): True label sequence
+        y_score (Sequence[float]): Predicted score sequence
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (Optional[str]): Chart title, default "Precision-Recall Curve" if None
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     precision, recall, _ = precision_recall_curve(y_true, y_score)
     ap = average_precision_score(y_true, y_score)
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.plot(recall, precision, label=f"PR (AUPRC={ap:.4f})", color="#ff7f0e", linewidth=2)
-    ax.set_title(title or "Precision-Recall 曲线")
+    ax.set_title(title or "Precision-Recall Curve")
     ax.set_xlabel("Recall")
     ax.set_ylabel("Precision")
     ax.legend(loc="best")
     _finalize(fig, save_path)
 
 
-# 8) 校准曲线（预测概率 vs. 真实分数）
+# 8) 校准curve（预测概率 vs. 真实分数）
 def plot_calibration_curve(
     y_true: Sequence[int],
     y_prob: Sequence[float],
     n_bins: int = 10,
     save_path: Optional[str] = None,
-    title: str = "概率校准曲线"
+    title: str = "Probability Calibration Curve"
 ) -> None:
     """
-    绘制概率校准曲线
-    
+    Plot probability calibration curve
+
     Args:
-        y_true (Sequence[int]): 真实标签序列
-        y_prob (Sequence[float]): 预测概率序列
-        n_bins (int): 分箱数量，默认为10
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (str): 图表标题，默认为"概率校准曲线"
-    
+        y_true (Sequence[int]): True label sequence
+        y_prob (Sequence[float]): Predicted probability sequence
+        n_bins (int): Number of bins, default 10
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (str): Chart title, default "Probability Calibration Curve"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=n_bins, strategy="uniform")
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.plot(prob_pred, prob_true, "s-", label="校准", color="#2ca02c")
+    ax.plot(prob_pred, prob_true, "s-", label="Calibration", color="#2ca02c")
     ax.plot([0, 1], [0, 1], "k--", alpha=0.5)
     ax.set_title(title)
-    ax.set_xlabel("预测概率分箱均值")
-    ax.set_ylabel("真实阳性率")
+    ax.set_xlabel("Predicted Probability Binning Mean")
+    ax.set_ylabel("True Positive Rate")
     ax.legend(loc="best")
     _finalize(fig, save_path)
 
@@ -579,19 +576,19 @@ def plot_threshold_scan(
     thresholds: Sequence[float],
     f1_vals: Sequence[float],
     save_path: Optional[str] = None,
-    title: str = "F1 vs. 阈值扫描"
+    title: str = "F1 vs. Threshold Scanning"
 ) -> None:
     """
-    绘制F1值随阈值变化的曲线图
-    
+    Plot F1 value vs threshold curve
+
     Args:
-        thresholds (Sequence[float]): 阈值序列
-        f1_vals (Sequence[float]): 对应阈值的F1值序列
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (str): 图表标题，默认为"F1 vs. 阈值扫描"
-    
+        thresholds (Sequence[float]): Threshold sequence
+        f1_vals (Sequence[float]): F1 value sequence corresponding to thresholds
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (str): Chart title, default "F1 vs. Threshold Scanning"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.plot(thresholds, f1_vals, color="#d62728", linewidth=2)
@@ -599,7 +596,7 @@ def plot_threshold_scan(
     if best_idx is not None:
         ax.axvline(thresholds[best_idx], color="#d62728", linestyle="--", alpha=0.6, label=f"best={thresholds[best_idx]:.3f}, F1={f1_vals[best_idx]:.4f}")
     ax.set_title(title)
-    ax.set_xlabel("阈值")
+    ax.set_xlabel("Threshold")
     ax.set_ylabel("F1")
     ax.legend(loc="best")
     _finalize(fig, save_path)
@@ -637,21 +634,21 @@ def plot_temperature_scaling_effect(
     T_opt: Optional[float],
     n_bins: int = 10,
     save_path: Optional[str] = None,
-    title: str = "温度缩放效果（可靠性/ECE）"
+    title: str = "Temperature Scaling Effect (Reliability/ECE)"
 ) -> None:
     """
-    绘制温度缩放效果对比图，展示校准前后的可靠性曲线和ECE值对比
-    
+    Plot temperature scaling effect comparison, showing reliability curve and ECE value before/after calibration
+
     Args:
-        y_true (Sequence[int]): 真实标签序列
-        logits (Sequence[float]): 未经sigmoid处理的原始logits
-        T_opt (Optional[float]): 最优温度值，如果为None则不进行温度缩放
-        n_bins (int): 分箱数量，默认为10
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (str): 图表标题，默认为"温度缩放效果（可靠性/ECE）"
-    
+        y_true (Sequence[int]): True label sequence
+        logits (Sequence[float]): Raw logits before sigmoid processing
+        T_opt (Optional[float]): Optimal temperature value, if None then no temperature scaling
+        n_bins (int): Number of bins, default 10
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (str): Chart title, default "Temperature Scaling Effect (Reliability/ECE)"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     y_true_np = np.asarray(y_true, dtype=np.int64)
     logits_np = np.asarray(logits, dtype=np.float32)
@@ -664,16 +661,16 @@ def plot_temperature_scaling_effect(
     ece_before = _compute_ece(y_true_np, probs_before, n_bins=n_bins)
     ece_after = _compute_ece(y_true_np, probs_after, n_bins=n_bins)
 
-    # 可靠性图
+    # Reliability plot
     fig, ax = plt.subplots(figsize=(6, 6))
     bt, bp = calibration_curve(y_true_np, probs_before, n_bins=n_bins, strategy="uniform")
     at, ap = calibration_curve(y_true_np, probs_after, n_bins=n_bins, strategy="uniform")
-    ax.plot(bp, bt, "o-", label=f"校准前 (ECE={ece_before:.4f})", color="#7f7f7f")
-    ax.plot(ap, at, "s-", label=f"校准后 (ECE={ece_after:.4f}, T={T_opt})", color="#1f77b4")
+    ax.plot(bp, bt, "o-", label=f"Before Calibration (ECE={ece_before:.4f})", color="#7f7f7f")
+    ax.plot(ap, at, "s-", label=f"After Calibration (ECE={ece_after:.4f}, T={T_opt})", color="#1f77b4")
     ax.plot([0, 1], [0, 1], "k--", alpha=0.5)
     ax.set_title(title)
-    ax.set_xlabel("预测概率分箱均值")
-    ax.set_ylabel("真实阳性率")
+    ax.set_xlabel("Predicted Probability Binning Mean")
+    ax.set_ylabel("True Positive Rate")
     ax.legend(loc="best")
     _finalize(fig, save_path)
 
@@ -684,20 +681,20 @@ def plot_per_fold_comparison(
     use_violin: bool = False,
     metrics: List[str] = ["auroc", "auprc", "f1"],
     save_path: Optional[str] = None,
-    title: str = "5折性能比较"
+    title: str = "5-Fold Performance Comparison"
 ) -> None:
     """
-    绘制每折交叉验证结果的性能比较图，支持箱线图和小提琴图两种形式
-    
+    Plot performance comparison for each fold cross-validation results, supporting box plot and violin plot
+
     Args:
-        fold_results (List[Dict[str, float]]): 每折的评估结果列表，每个元素是一个字典
-        use_violin (bool): 是否使用小提琴图，默认为False即使用箱线图
-        metrics (List[str]): 要比较的指标列表，默认为["auroc", "auprc", "f1"]
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (str): 图表标题，默认为"5折性能比较"
-    
+        fold_results (List[Dict[str, float]]): Evaluation results list for each fold, each element is a dictionary
+        use_violin (bool): Whether to use violin plot, default False (use box plot)
+        metrics (List[str]): List of metrics to compare, default ["auroc", "auprc", "f1"]
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (str): Chart title, default "5-Fold Performance Comparison"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
+        None: Display or save chart directly, no return value
     """
     df = pd.DataFrame(fold_results)
     df = df[metrics]
@@ -709,8 +706,8 @@ def plot_per_fold_comparison(
         sns.boxplot(data=df_melt, x="metric", y="value", ax=ax)
     sns.stripplot(data=df_melt, x="metric", y="value", color="black", size=4, alpha=0.6, ax=ax)
     ax.set_title(title)
-    ax.set_xlabel("指标")
-    ax.set_ylabel("值")
+    ax.set_xlabel("Metric")
+    ax.set_ylabel("Value")
     _finalize(fig, save_path)
 
 
@@ -719,22 +716,22 @@ def plot_confusion_matrix_heatmap(
     cm: Union[Tuple[int, int, int, int], np.ndarray],
     normalize: bool = False,
     save_path: Optional[str] = None,
-    title: str = "混淆矩阵热力图"
+    title: str = "Confusion Matrix Heatmap"
 ) -> None:
     """
-    绘制混淆矩阵热力图
-    
+    Plot confusion matrix heatmap
+
     Args:
-        cm (Union[Tuple[int, int, int, int], np.ndarray]): 混淆矩阵，可以是(tn, fp, fn, tp)元组或2x2矩阵
-        normalize (bool): 是否进行归一化处理，默认为False
-        save_path (Optional[str]): 图片保存路径，如果为None则直接显示图表
-        title (str): 图表标题，默认为"混淆矩阵热力图"
-    
+        cm (Union[Tuple[int, int, int, int], np.ndarray]): Confusion matrix, can be (tn, fp, fn, tp) tuple or 2x2 matrix
+        normalize (bool): Whether to normalize, default False
+        save_path (Optional[str]): Image save path, if None then display chart
+        title (str): Chart title, default "Confusion Matrix Heatmap"
+
     Returns:
-        None: 直接显示或保存图表，无返回值
-        
+        None: Display or save chart directly, no return value
+
     Raises:
-        ValueError: 当混淆矩阵不是2x2形状时抛出异常
+        ValueError: When confusion matrix is not 2x2 shape
     """
     if isinstance(cm, tuple) or isinstance(cm, list):
         tn, fp, fn, tp = cm
@@ -742,7 +739,7 @@ def plot_confusion_matrix_heatmap(
     else:
         mat = np.asarray(cm, dtype=np.float64)
         if mat.shape != (2, 2):
-            raise ValueError("混淆矩阵必须为2x2或(tn, fp, fn, tp)。")
+            raise ValueError("Confusion matrix must be 2x2 or (tn, fp, fn, tp).")
 
     disp = mat.copy()
     if normalize:
@@ -753,10 +750,10 @@ def plot_confusion_matrix_heatmap(
     fig, ax = plt.subplots(figsize=(5, 4))
     sns.heatmap(disp, annot=True, fmt=".3f" if normalize else "g", cmap="Blues", cbar=True, ax=ax)
     ax.set_title(title)
-    ax.set_xlabel("预测")
-    ax.set_ylabel("真实")
-    ax.set_xticklabels(["负类", "正类"])
-    ax.set_yticklabels(["负类", "正类"])
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+    ax.set_xticklabels(["Negative", "Positive"])
+    ax.set_yticklabels(["Negative", "Positive"])
     _finalize(fig, save_path)
 
 
@@ -775,10 +772,10 @@ def load_epoch_metrics_csv(csv_path: str) -> pd.DataFrame:
     返回:
         pd.DataFrame: 包含以下列的数据框:
             - epoch: 训练轮次
-            - loss_train: 训练损失
-            - task_loss: 任务损失
-            - cont_loss: 对比损失
-            - adv_loss: 对抗损失
+            - loss_train: 训练loss
+            - task_loss: 任务loss
+            - cont_loss: 对比loss
+            - adv_loss: 对抗loss
             - auroc: AUROC评估指标
             - auprc: AUPRC评估指标
             - precision: 精确率

@@ -162,6 +162,54 @@ def settings():
     # 融合策略
     parser.add_argument('--fusion_heads', type=int, default=4,
                         help='对偶融合的多头注意力头数，默认 4。')
+    parser.add_argument('--fusion_strategy', type=str, default='self_attention',
+                        choices=['self_attention', 'co_attention', 'hybrid', 'transformer_multihead'],
+                        help='两实体融合策略：self_attention|co_attention|hybrid|transformer_multihead，默认 self_attention。')
+    # 混合策略特定参数
+    parser.add_argument('--fusion_weight', type=float, default=0.5,
+                        help='混合策略中自注意力的权重(0-1)，默认 0.5。')
+    # 协作注意力特定参数
+    parser.add_argument('--co_hidden_dim', type=int, default=None,
+                        help='协作注意力的隐藏维度，None时使用输入维度')
+    # 控制是否使用协作注意力以及使用哪种类型的协作注意力
+    parser.add_argument('--use_co_attention', type=lambda x: str(x).lower() == 'true', default=False,
+                        help='是否使用协作注意力，默认 False')
+    parser.add_argument('--co_attention_type', type=str, default='transformer',
+                        help='协作注意力类型和参数，格式：type[param1=value1,...]，默认 transformer')
+    
+    # 高级注意力机制参数
+    parser.add_argument('--attention_config', type=str, default=None,
+                        help='高级注意力配置字符串，格式：fusion_type[params]，例如：transformer[num_heads=8,dropout=0.1]')
+    parser.add_argument('--use_multihead', type=lambda x: str(x).lower() == 'true', default=False,
+                        help='是否使用多头注意力机制，默认 False')
+
+    parser.add_argument('--transformer_style', type=lambda x: str(x).lower() == 'true', default=True,
+                        help='是否使用Transformer风格的注意力，默认 True')
+    
+    # 模型类型选择参数
+    parser.add_argument('--model_type', type=str, default='moco',
+                        choices=['moco', 'byol'],
+                        help='自监督学习模型类型选择：moco|byol，默认 moco')
+    
+    # MoCo配置参数
+    parser.add_argument('--moco_type', type=str, default='basic',
+                        choices=['basic', 'double_tau'],
+                        help='MoCo类型选择：basic|double_tau，默认 basic')
+    parser.add_argument('--moco_config', type=str, default=None,
+                        help='高级MoCo配置字符串，格式：type[param1=value1,...]，例如：enhanced[K=8192,gate_hidden=128]')
+    parser.add_argument('--moco_K', type=int, default=4096,
+                        help='MoCo队列大小，默认 4096')
+    parser.add_argument('--moco_m', type=float, default=0.999,
+                        help='MoCo动量更新系数，默认 0.999')
+    parser.add_argument('--moco_T', type=float, default=0.2,
+                        help='MoCo基础温度系数，默认 0.2')
+    parser.add_argument('--moco_tau1', type=float, default=0.2,
+                        help='DoubleTau MoCo正样本温度系数(tau1)，默认 0.2')
+    parser.add_argument('--moco_tau2', type=float, default=0.3,
+                        help='DoubleTau MoCo负样本温度系数(tau2)，默认 0.3')
+
+    
+
 
     # ==================== MoCo v2 / 对比学习 ====================
     parser.add_argument('--moco_queue', type=int, default=4096,
@@ -174,8 +222,28 @@ def settings():
                         help='投影维度，默认随 hidden2。')
     parser.add_argument('--queue_warmup_steps', type=int, default=0,
                         help='队列预热步数（预热期间仅用 batch 内负样本）。')
-    parser.add_argument('--moco_debug', type=int, default=0,
-                        help='轻量级 MoCo 调试日志开关（0/1）。')
+
+    
+    # 添加控制是否启用第0视图的参数
+    parser.add_argument('--enable_view_0', type=lambda x: str(x).lower() == 'true', default=True,
+                        help='是否启用MoCo第0视图（使用损图），默认true。')
+    parser.add_argument('--num_views', type=int, default=3,
+                        help='MoCo多视图数量，默认3。')
+    
+
+    
+    # ==================== DoubleTau MoCo 特定参数 ====================
+
+
+    # ==================== BYOL 配置参数 ====================
+    parser.add_argument('--byol_config', type=str, default=None,
+                        help='高级BYOL配置字符串，格式：type[param1=value1,...]，例如：basic[predictor_dim=512,ema_momentum=0.998]')
+    parser.add_argument('--byol_predictor_dim', type=int, default=256,
+                        help='BYOL预测头维度，默认 256')
+    parser.add_argument('--byol_ema_momentum', type=float, default=0.996,
+                        help='BYOL指数移动平均系数，默认 0.996')
+    parser.add_argument('--byol_temperature', type=float, default=0.2,
+                        help='BYOL温度系数，用于缩放余弦相似度损失，默认 0.2')
 
     # ==================== CPU 并行与数据加载 ====================
     parser.add_argument('--threads', type=int, default=32,

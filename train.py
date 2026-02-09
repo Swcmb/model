@@ -5,7 +5,7 @@ import numpy as np  # 数值计算库
 import torch  # PyTorch 主库
 import torch.nn as nn  # PyTorch 神经网络模块
 from torch_geometric.data import Data  # 图数据结构支持
-from layer import apply_augmentation, adversarial_step_multi  # 增强与对抗步骤
+from layer import apply_augmentation, adversarial_step_multi, BYOLLoss, compute_byol_loss  # 增强与对抗步骤，BYOL相关
 from log_output_manager import save_result_text, get_run_paths  # 日志与结果管理
 from sklearn.metrics import (roc_auc_score, roc_curve, average_precision_score, 
                            f1_score, auc, precision_score, recall_score, confusion_matrix)  # 评估指标
@@ -235,11 +235,25 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
                 log = torch.squeeze(m(output))
                 loss1 = loss_fct(log, label.float())
                 if float(getattr(args, "loss_ratio2", 0.0) or 0.0) > 0.0:
-                    if isinstance(cla_os, (list, tuple)):
-                        losses = [ce_loss(lg, tg) for lg, tg in zip(cla_os, cla_os_a)]
-                        loss2 = torch.stack(losses).mean()
+                    # 获取模型类型
+                    model_type = getattr(args, "model_type", "moco")
+                    
+                    if model_type == "byol":
+                        # BYOL模型：使用BYOL对称损失
+                        if isinstance(cla_os, (list, tuple)) and isinstance(cla_os_a, (list, tuple)):
+                            # BYOL模型：使用BYOL对称损失（多视图）
+                            loss2 = compute_byol_loss(cla_os, cla_os_a, temperature=args.byol_temperature)
+                        else:
+                            # 单个视图对的情况
+                            byol_loss = BYOLLoss(temperature=args.byol_temperature)
+                            loss2 = byol_loss(cla_os, cla_os, cla_os_a, cla_os_a)
                     else:
-                        loss2 = ce_loss(cla_os, cla_os_a)
+                        # MoCo模型：使用交叉熵损失
+                        if isinstance(cla_os, (list, tuple)):
+                            losses = [ce_loss(lg, tg) for lg, tg in zip(cla_os, cla_os_a)]
+                            loss2 = torch.stack(losses).mean()
+                        else:
+                            loss2 = ce_loss(cla_os, cla_os_a)
                 else:
                     loss2 = torch.tensor(0.0, device=device)
                 loss3 = node_loss(logits, lbl2.float())
@@ -257,13 +271,27 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
 
                 log = torch.squeeze(m(output))  # 对主任务输出应用Sigmoid并压缩维度
                 loss1 = loss_fct(log, label.float())  # 计算主任务的二元交叉熵损失
-                # MoCo：支持单/多视图；当 alpha=0 时跳过计算以隔离监督路径
+                # 自监督学习：支持MoCo/BYOL；当 alpha=0 时跳过计算以隔离监督路径
                 if float(getattr(args, "loss_ratio2", 0.0) or 0.0) > 0.0:
-                    if isinstance(cla_os, (list, tuple)):
-                        losses = [ce_loss(lg, tg) for lg, tg in zip(cla_os, cla_os_a)]
-                        loss2 = torch.stack(losses).mean()
+                    # 获取模型类型
+                    model_type = getattr(args, "model_type", "moco")
+                    
+                    if model_type == "byol":
+                        # BYOL模型：使用BYOL对称损失
+                        if isinstance(cla_os, (list, tuple)) and isinstance(cla_os_a, (list, tuple)):
+                            # BYOL模型：使用BYOL对称损失（多视图）
+                            loss2 = compute_byol_loss(cla_os, cla_os_a, temperature=args.byol_temperature)
+                        else:
+                            # 单个视图对的情况
+                            byol_loss = BYOLLoss(temperature=args.byol_temperature)
+                            loss2 = byol_loss(cla_os, cla_os, cla_os_a, cla_os_a)
                     else:
-                        loss2 = ce_loss(cla_os, cla_os_a)
+                        # MoCo模型：使用交叉熵损失
+                        if isinstance(cla_os, (list, tuple)):
+                            losses = [ce_loss(lg, tg) for lg, tg in zip(cla_os, cla_os_a)]
+                            loss2 = torch.stack(losses).mean()
+                        else:
+                            loss2 = ce_loss(cla_os, cla_os_a)
                 else:
                     loss2 = torch.tensor(0.0, device=device)
                 # 节点级对抗损失改为 loss_ratio3 对应
@@ -275,6 +303,11 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
             loss_history.append(loss_train.item())  # 记录当前批次的总损失
             loss_train.backward()  # 反向传播，计算梯度
             optimizer.step()  # 更新模型参数
+            
+            # ✅ 正统BYOL EMA更新：在optimizer.step()之后更新target网络
+            if hasattr(model, 'ssl_module') and hasattr(model.ssl_module, 'update_target_encoder'):
+                if model.model_type == "byol":
+                    model.ssl_module.update_target_encoder()
 
             label_ids = label.to('cpu').numpy()  # 将标签移回CPU并转为numpy数组
             y_label_train = y_label_train + label_ids.flatten().tolist()  # 收集真实标签
@@ -290,9 +323,9 @@ def train_model(model, optimizer, data_o, data_a, train_loader, test_loader, arg
             roc_train = roc_auc_score(y_label_train, y_pred_train)
             auprc_train = average_precision_score(y_label_train, y_pred_train)
             outputs_train = np.asarray((np.asarray(y_pred_train) >= 0.5).astype(int))
-            precision_train = precision_score(y_label_train, outputs_train, zero_division="warn")
-            recall_train = recall_score(y_label_train, outputs_train, zero_division="warn")
-            f1_train = f1_score(y_label_train, outputs_train, zero_division="warn")
+            precision_train = precision_score(y_label_train, outputs_train, zero_division=0)
+            recall_train = recall_score(y_label_train, outputs_train, zero_division=0)
+            f1_train = f1_score(y_label_train, outputs_train, zero_division=0)
             tn, fp, fn, tp = confusion_matrix(y_label_train, outputs_train).ravel()
         else:
             roc_train = 0.0
@@ -552,7 +585,7 @@ def test(model, loader, data_o, data_a, args):
             def _f1_at_thresh(p, thr):
                 preds = (p >= thr).astype(np.int64)
                 from sklearn.metrics import f1_score
-                return f1_score(y_true_np, preds, zero_division="warn")
+                return f1_score(y_true_np, preds, zero_division=0)
             f1_vals = [ _f1_at_thresh(probs_np, thr) for thr in ths ]
             idx = int(np.argmax(f1_vals))
             best_t, best_f1 = float(ths[idx]), float(f1_vals[idx])
@@ -592,9 +625,9 @@ def test(model, loader, data_o, data_a, args):
     # 计算全量测试指标
     auroc = roc_auc_score(y_label, y_pred)
     auprc = average_precision_score(y_label, y_pred)
-    precision = precision_score(y_label, outputs, zero_division="warn")
-    recall = recall_score(y_label, outputs, zero_division="warn")
-    f1 = f1_score(y_label, outputs, zero_division="warn")
+    precision = precision_score(y_label, outputs, zero_division=0)
+    recall = recall_score(y_label, outputs, zero_division=0)
+    f1 = f1_score(y_label, outputs, zero_division=0)
     tn, fp, fn, tp = confusion_matrix(y_label, outputs).ravel()
 
     # 返回测试集上的 AUROC, AUPRC, Precision, Recall, F1, 平均损失 与 混淆矩阵
@@ -634,7 +667,7 @@ def test(model, loader, data_o, data_a, args):
                 def _f1_at_thresh(p, thr):
                     preds = (p >= thr).astype(np.int64)
                     from sklearn.metrics import f1_score
-                    return f1_score(y_true_np, preds, zero_division="warn")
+                    return f1_score(y_true_np, preds, zero_division=0)
 
                 f1_vals = [ _f1_at_thresh(probs_np, thr) for thr in ths ]
                 th_out = os.path.join(out_dir, f"threshold_scan_{fold_tag}_{_run_id}.csv" if _run_id else f"threshold_scan_{fold_tag}.csv")
